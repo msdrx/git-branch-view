@@ -42,7 +42,7 @@ branch tree and graph. It uses the CLI directly (not VS Code's Git API) for full
 control over `git log` graph output and arbitrary compare ranges.
 
 ## 
-![Branch view](https://github.com/msdrx/git-branch-view.git/media/screenshot.png)
+![Branch view](https://github.com/msdrx/git-branch-view/blob/main/media/screenshot.png)
 
 ## License
 
