@@ -1,0 +1,24 @@
+.vscode/**
+.devcontainer/**
+src/**
+out/**/*.map
+tsconfig.json
+**/*.ts
+.gitignore
+node_modules/**
+image.png
+
+# Dev/CI tooling and repo cruft that doesn't belong in the package
+e2e/**
+scripts/**
+.claude/**
+.github/**
+package-lock.json
+**/*.vsix
+CLAUDE.md
+.vscodeignore
+plan.md
+logs/**
+vitest.config.ts
+test/**
+implementation.md

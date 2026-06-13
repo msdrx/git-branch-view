@@ -1,0 +1,12 @@
+{
+  "name": "git-branch-view-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Headless screenshot harness for the Git Branch View extension.",
+  "scripts": {
+    "shots": "bash run-shots.sh"
+  },
+  "dependencies": {
+    "playwright-core": "^1.49.1"
+  }
+}

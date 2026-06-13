@@ -1,0 +1,528 @@
+:root {
+  --row-height: 26px;
+  --lane-width: 14px;
+  --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+
+  /* Commit-list column widths. Driven from main.js (persisted per-user); the
+     defaults here keep the first paint sensible before any data arrives.
+     --col-branch tracks the computed graph width; --col-message is the flexible
+     filler (1fr) and --col-spacer stays 0 until the user pins Message to a fixed
+     width, at which point the spacer (switched to 1fr) absorbs the slack. */
+  --col-branch: var(--graph-col, 160px);
+  --col-message: 1fr;
+  --col-author: 140px;
+  --col-date: 120px;
+  --col-id: 90px;
+  --col-spacer: 0px;
+}
+
+/* Single source of truth for the column layout, shared by the header and every
+   commit row so they stay pixel-aligned. */
+.grid-cols {
+  grid-template-columns:
+    var(--col-branch) var(--col-message) var(--col-author)
+    var(--col-date) var(--col-id) var(--col-spacer);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ---------- Toolbar ---------- */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.tb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tb-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* Caret half of the Pull split-button: tight against Pull, no label gap. */
+.tb-caret {
+  gap: 0;
+  padding: 3px 4px;
+  margin-left: -6px;
+  font-size: 10px;
+}
+
+.tb-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+/* ---------- Split ---------- */
+#split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+#left {
+  width: 260px;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+#divider {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+#divider:hover {
+  background: var(--vscode-focusBorder);
+}
+
+#right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pane-header {
+  padding: 6px 10px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter {
+  margin: 6px 8px;
+  padding: 4px 6px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 3px;
+  outline: none;
+}
+
+.filter:focus {
+  border-color: var(--vscode-focusBorder);
+}
+
+/* ---------- Branch tree ---------- */
+#tree {
+  flex: 1;
+  overflow: auto;
+  padding: 2px 0;
+}
+
+/* ---------- Changed files of the selected commit ---------- */
+#changes {
+  flex: 1;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+
+/* Grab strip along the top edge; drag to trade height with the branch tree. */
+#hdivider {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 5px;
+  cursor: row-resize;
+  z-index: 2;
+}
+
+#hdivider:hover {
+  background: var(--vscode-focusBorder);
+}
+
+#changes .changes-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: none;
+}
+
+#changes .changes-header .label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+#changes .changes-header .close-btn {
+  flex: none;
+  border: none;
+  border-radius: 3px;
+  padding: 1px 5px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+}
+
+#changes .changes-header .close-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+#changes .files {
+  flex: 1;
+  overflow: auto;
+  padding: 2px 0;
+}
+
+#changes .file-node .status {
+  width: 14px;
+  text-align: center;
+  font-weight: 700;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.tree-node:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.tree-node.selected {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.tree-node.group {
+  font-weight: 600;
+}
+
+.tree-node .twisty {
+  width: 12px;
+  display: inline-block;
+  text-align: center;
+  opacity: 0.8;
+}
+
+.tree-node .icon {
+  width: 14px;
+  text-align: center;
+}
+
+.tree-node.head .label {
+  font-weight: 700;
+}
+
+.tree-node .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-badge {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.indent-1 {
+  padding-left: 30px;
+}
+.indent-2 {
+  padding-left: 46px;
+}
+
+/* ---------- Right header ---------- */
+#rightHeader {
+  border-bottom: 1px solid var(--border);
+}
+
+.section {
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section .title {
+  font-weight: 600;
+}
+
+.section a {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.section a:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Graph + columns ---------- */
+#graphWrap {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+#columns {
+  display: grid;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--vscode-editor-background);
+  border-bottom: 1px solid var(--border);
+}
+
+#columns .col {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 5px 10px;
+  font-weight: 600;
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+
+#columns .col .col-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Grab strip over each column's right edge; drag to resize that column. */
+#columns .col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+#columns .col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+}
+
+#columns .col-resizer:hover::after,
+#columns .col-resizer.active::after {
+  background: var(--vscode-focusBorder);
+}
+
+/* While dragging a divider, keep the resize cursor everywhere and stop the
+   pointer from selecting text as it sweeps across the rows. */
+body.col-resizing,
+body.col-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+.commit-row {
+  display: grid;
+  height: var(--row-height);
+  align-items: center;
+  cursor: pointer;
+}
+
+.commit-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.commit-row.selected {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.commit-row .cell {
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-row .graph-cell {
+  padding: 0;
+  position: relative;
+  height: 100%;
+  overflow: visible;
+}
+
+.commit-row .msg .ref-chip {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+
+.commit-row .msg .ref-chip.head {
+  background: var(--vscode-gitDecoration-modifiedResourceForeground, #1f8b4c);
+  color: #fff;
+}
+
+.commit-row .author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mono {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Context menu ---------- */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  padding: 4px 0;
+  background: var(--vscode-menu-background, var(--vscode-editor-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--border));
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.context-menu .item {
+  padding: 5px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.context-menu .item:hover {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
+
+.context-menu .item.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.context-menu .sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---------- Compare mode (ahead/behind sections in the commit list) ---------- */
+.compare-section {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-descriptionForeground, inherit);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--vscode-editor-background);
+  z-index: 2;
+}
+
+.commit-row .graph-cell .dir {
+  display: inline-block;
+  width: 100%;
+  text-align: center;
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+.status-A {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+.status-M {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+}
+.status-D {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+}
+
+.empty {
+  padding: 20px;
+  opacity: 0.6;
+  text-align: center;
+}
+
+/* Sentinel row at the bottom of the commit list while a page is in flight. */
+.load-more {
+  padding: 8px;
+  opacity: 0.6;
+  text-align: center;
+  font-style: italic;
+}

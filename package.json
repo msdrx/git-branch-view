@@ -1,0 +1,408 @@
+{
+  "name": "git-branch-view",
+  "displayName": "Git Branch View",
+  "description": "Simple Git branch view for VS Code",
+  "version": "0.1.0",
+  "publisher": "msdrx",
+  "author": {
+    "name": "Mikheil Sadradze",
+    "email": "sadradzemikheil@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/msdrx/git-branch-view.git"
+  },
+  "gitBranchViewDefaults": {
+    "ui": "both"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "categories": [
+    "SCM Providers",
+    "Visualization"
+  ],
+  "keywords": [
+    "git",
+    "branch",
+    "graph",
+    "vs code",
+    "scm"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "gitBranchView.open",
+        "title": "Open Branch View",
+        "category": "Git Branches",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "gitBranchView.refresh",
+        "title": "Refresh Branch View",
+        "category": "Git Branches",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gitBranchView.selectUi",
+        "title": "Select UI Mode…",
+        "category": "Git Branches",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "gitBranchView.native.fetch",
+        "title": "Fetch",
+        "category": "Git Branches",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "gitBranchView.native.pull",
+        "title": "Pull",
+        "category": "Git Branches",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "gitBranchView.native.push",
+        "title": "Push",
+        "category": "Git Branches",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "gitBranchView.native.newBranch",
+        "title": "New Branch…",
+        "category": "Git Branches",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gitBranchView.native.refresh",
+        "title": "Refresh",
+        "category": "Git Branches",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gitBranchView.native.setPullStrategy",
+        "title": "Set Pull Strategy…",
+        "category": "Git Branches",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "gitBranchView.native.checkout",
+        "title": "Checkout",
+        "category": "Git Branches",
+        "icon": "$(check)"
+      },
+      {
+        "command": "gitBranchView.native.merge",
+        "title": "Merge into Current Branch",
+        "category": "Git Branches"
+      },
+      {
+        "command": "gitBranchView.native.compare",
+        "title": "Compare with…",
+        "category": "Git Branches"
+      },
+      {
+        "command": "gitBranchView.native.delete",
+        "title": "Delete Branch",
+        "category": "Git Branches",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gitBranchView.native.focusBranch",
+        "title": "View Branch History",
+        "category": "Git Branches"
+      },
+      {
+        "command": "gitBranchView.native.openCommitFile",
+        "title": "Open Changes",
+        "category": "Git Branches"
+      },
+      {
+        "command": "gitBranchView.native.copyCommitId",
+        "title": "Copy Commit ID",
+        "category": "Git Branches",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "gitBranchView.native.newBranchFromCommit",
+        "title": "New Branch from Commit…",
+        "category": "Git Branches"
+      },
+      {
+        "command": "gitBranchView.native.checkoutCommit",
+        "title": "Checkout Commit (detached)",
+        "category": "Git Branches"
+      },
+      {
+        "command": "gitBranchView.native.loadMore",
+        "title": "Load More Commits",
+        "category": "Git Branches"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gitBranchView",
+          "title": "Git Branches",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "gitBranchView": [
+        {
+          "id": "gitBranchView.branches",
+          "name": "Branches",
+          "when": "gitBranchView.nativeEnabled"
+        },
+        {
+          "id": "gitBranchView.commits",
+          "name": "Commits",
+          "when": "gitBranchView.nativeEnabled"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "gitBranchView.branches",
+        "contents": "No Git repository was found in the open folder(s).\nOpen a folder that is a Git repository to use the Branch View.",
+        "when": "gitBranchView.nativeEnabled && gitBranchView.noRepo"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "gitBranchView.open",
+          "group": "navigation"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "gitBranchView.native.fetch",
+          "when": "view == gitBranchView.branches",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gitBranchView.native.pull",
+          "when": "view == gitBranchView.branches",
+          "group": "navigation@2"
+        },
+        {
+          "command": "gitBranchView.native.push",
+          "when": "view == gitBranchView.branches",
+          "group": "navigation@3"
+        },
+        {
+          "command": "gitBranchView.native.newBranch",
+          "when": "view == gitBranchView.branches",
+          "group": "navigation@4"
+        },
+        {
+          "command": "gitBranchView.native.refresh",
+          "when": "view == gitBranchView.branches",
+          "group": "navigation@5"
+        },
+        {
+          "command": "gitBranchView.native.setPullStrategy",
+          "when": "view == gitBranchView.branches",
+          "group": "1_config"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "gitBranchView.native.checkout",
+          "when": "view == gitBranchView.branches && (viewItem == gbv.branch.local || viewItem == gbv.branch.remote)",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "gitBranchView.native.newBranch",
+          "when": "view == gitBranchView.branches && viewItem =~ /^gbv\\.branch/",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "gitBranchView.native.merge",
+          "when": "view == gitBranchView.branches && (viewItem == gbv.branch.local || viewItem == gbv.branch.remote)",
+          "group": "1_modify@3"
+        },
+        {
+          "command": "gitBranchView.native.compare",
+          "when": "view == gitBranchView.branches && viewItem =~ /^gbv\\.branch/",
+          "group": "1_modify@4"
+        },
+        {
+          "command": "gitBranchView.native.delete",
+          "when": "view == gitBranchView.branches && viewItem == gbv.branch.local",
+          "group": "9_danger@1"
+        },
+        {
+          "command": "gitBranchView.native.copyCommitId",
+          "when": "view == gitBranchView.commits && viewItem == gbv.commit",
+          "group": "1_commit@1"
+        },
+        {
+          "command": "gitBranchView.native.newBranchFromCommit",
+          "when": "view == gitBranchView.commits && viewItem == gbv.commit",
+          "group": "1_commit@2"
+        },
+        {
+          "command": "gitBranchView.native.checkoutCommit",
+          "when": "view == gitBranchView.commits && viewItem == gbv.commit",
+          "group": "1_commit@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "gitBranchView.native.checkout",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.merge",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.compare",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.delete",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.focusBranch",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.openCommitFile",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.copyCommitId",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.newBranchFromCommit",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.checkoutCommit",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.loadMore",
+          "when": "false"
+        },
+        {
+          "command": "gitBranchView.native.fetch",
+          "when": "gitBranchView.nativeEnabled"
+        },
+        {
+          "command": "gitBranchView.native.pull",
+          "when": "gitBranchView.nativeEnabled"
+        },
+        {
+          "command": "gitBranchView.native.push",
+          "when": "gitBranchView.nativeEnabled"
+        },
+        {
+          "command": "gitBranchView.native.newBranch",
+          "when": "gitBranchView.nativeEnabled"
+        },
+        {
+          "command": "gitBranchView.native.refresh",
+          "when": "gitBranchView.nativeEnabled"
+        },
+        {
+          "command": "gitBranchView.native.setPullStrategy",
+          "when": "gitBranchView.nativeEnabled"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Git Branch View",
+      "properties": {
+        "gitBranchView.ui": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "webview",
+            "native",
+            "both"
+          ],
+          "enumDescriptions": [
+            "Use the UI baked in when the extension was packaged (defaults to the webview).",
+            "Webview: the Visual Studio-style window with the lane-drawn commit graph and resizable columns.",
+            "Native: built-in VS Code tree views (Branches + Commits) in the activity bar — themed and accessible, but no graph.",
+            "Both: the webview window and the native tree views, active at the same time."
+          ],
+          "default": "auto",
+          "description": "Which front-end the branch view uses. Changing this needs a window reload. Also settable via the \"Git Branches: Select UI Mode…\" command."
+        },
+        "gitBranchView.commitLimit": {
+          "type": "number",
+          "default": 500,
+          "description": "Commits per page in the native commit list (a \"Load more commits…\" row pages in the rest). The webview graph ignores this — it pages in history automatically as you scroll."
+        },
+        "gitBranchView.dateFormat": {
+          "type": "string",
+          "enum": [
+            "relative",
+            "iso",
+            "local"
+          ],
+          "default": "local",
+          "description": "How commit dates are displayed in the Date column."
+        },
+        "gitBranchView.pullStrategy": {
+          "type": "string",
+          "enum": [
+            "merge",
+            "rebase",
+            "ff-only"
+          ],
+          "enumDescriptions": [
+            "Merge: create a merge commit to reconcile divergent branches (git pull --no-rebase).",
+            "Rebase: replay your local commits on top of the upstream (git pull --rebase).",
+            "Fast-forward only: only update when no merge is needed, otherwise abort (git pull --ff-only)."
+          ],
+          "default": "merge",
+          "description": "Strategy used when pulling from a remote. Passed explicitly on every pull so divergent branches are reconciled without prompting. Change it from the Pull menu in the Branch View toolbar."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./ && npm run typecheck:webview && node scripts/build-webview.js",
+    "watch": "node scripts/build-webview.js --watch & tsc -watch -p ./",
+    "typecheck:webview": "tsc -p src/webview/tsconfig.json",
+    "lint": "eslint src --ext ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "shots": "bash e2e/run-shots.sh",
+    "shots:both": "bash e2e/run-both.sh",
+    "configure-ui": "node scripts/configure-ui.js",
+    "package": "node scripts/configure-ui.js both && bash scripts/package-vsix.sh",
+    "install:dev": "bash scripts/install-dev-extension.sh"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^20.11.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.28.0",
+    "jsdom": "^29.1.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.8"
+  }
+}
