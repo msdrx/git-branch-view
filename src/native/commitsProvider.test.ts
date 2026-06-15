@@ -65,7 +65,7 @@ describe('CommitsProvider paging', () => {
   it('compare mode shows the comparison sections, never a Load more row', async () => {
     const p = provider();
     p.setCommits([commit('a')], true);
-    p.setCompare('main', 'dev', {
+    p.setCompare('refs/heads/main', 'refs/heads/dev', {
       ahead: [commit('x')],
       behind: [],
       files: [],
@@ -73,10 +73,27 @@ describe('CommitsProvider paging', () => {
     });
     const roots = await p.getChildren();
     expect(roots.every((n) => n.kind === 'section')).toBe(true);
+    expect(roots.map((n) => (n.kind === 'section' ? n.label : ''))).toContain(
+      'In dev, not in main (1)'
+    );
 
     // The next setCommits returns to (paged) branch history.
     p.setCommits([commit('a')], true);
     expect(rootHashes(await p.getChildren())).toEqual(['a', 'loadMore']);
+  });
+
+  it('shows both sides of a rename in file rows', () => {
+    const p = provider();
+    const item = p.getTreeItem({
+      kind: 'file',
+      commitHash: 'c1',
+      parentHash: 'p1',
+      status: 'R100',
+      oldPath: 'src/old.ts',
+      path: 'src/new.ts',
+    });
+    expect(item.label).toBe('src/old.ts -> src/new.ts');
+    expect(item.tooltip).toBe('src/old.ts -> src/new.ts');
   });
 });
 

@@ -42,6 +42,20 @@ const dataMsg: HostMessage = {
   focused: 'main',
 };
 
+const compareDataMsg: HostMessage = {
+  ...dataMsg,
+  branches: [
+    ...(dataMsg as Extract<HostMessage, { type: 'data' }>).branches,
+    {
+      refName: 'refs/heads/feature/payments',
+      name: 'feature/payments',
+      commit: 'bbbb',
+      kind: 'local',
+      isHead: false,
+    },
+  ],
+};
+
 const detailMsg: HostMessage = {
   type: 'commitDetail',
   detail: {
@@ -100,6 +114,7 @@ describe('App: commit click → changed files → diff editor beside', () => {
   it('clicking a changed file asks the host to open the diff editor and marks it selected', () => {
     render(<App />);
     hostSends(dataMsg);
+    fireEvent.click(screen.getByText('Refactor engine core'));
     hostSends(detailMsg);
     postMock.mockClear();
 
@@ -121,9 +136,13 @@ describe('App: commit click → changed files → diff editor beside', () => {
   it('passes a null parent for a root commit', () => {
     render(<App />);
     hostSends(dataMsg);
+    fireEvent.click(screen.getByText('Refactor engine core'));
     hostSends({
       ...detailMsg,
-      detail: { ...detailMsg.detail, commit: commit('ffff0000ffff0000', 'Initial', []) },
+      detail: {
+        ...detailMsg.detail,
+        commit: commit('dc3b7844ee2809b74e7ef1', 'Refactor engine core', []),
+      },
     } as HostMessage);
     postMock.mockClear();
 
@@ -136,6 +155,7 @@ describe('App: commit click → changed files → diff editor beside', () => {
   it('the ✕ button closes the changed-files tree', () => {
     render(<App />);
     hostSends(dataMsg);
+    fireEvent.click(screen.getByText('Refactor engine core'));
     hostSends(detailMsg);
     fireEvent.click(screen.getByTitle('Close changed files'));
     expect(document.querySelector('#changes')).toBeNull();
@@ -271,11 +291,13 @@ describe('App: arrow-key commit navigation', () => {
 
   it('in compare mode the arrows walk the ahead and behind sections as one list', () => {
     render(<App />);
-    hostSends(threeCommits);
+    hostSends({ ...compareDataMsg, commits: threeCommits.commits } as HostMessage);
+    fireEvent.click(screen.getByText('Compare'));
+    fireEvent.click(screen.getByText('feature/payments'));
     hostSends({
       type: 'compareResult',
-      base: 'main',
-      target: 'feature/payments',
+      base: 'refs/heads/main',
+      target: 'refs/heads/feature/payments',
       result: {
         ahead: [commit('a1a1a1a1a1a1a1a1a1a1', 'Add payments')],
         behind: [commit('b2b2b2b2b2b2b2b2b2b2', 'Fix typo on main')],
@@ -379,8 +401,8 @@ describe('App: arrow-key navigation inside the changed-files tree', () => {
 describe('App: branch compare → changed files → diff editor beside', () => {
   const compareMsg: HostMessage = {
     type: 'compareResult',
-    base: 'main',
-    target: 'feature/payments',
+    base: 'refs/heads/main',
+    target: 'refs/heads/feature/payments',
     result: {
       ahead: [commit('a1a1a1a1a1a1a1a1a1a1', 'Add payments')],
       behind: [commit('b2b2b2b2b2b2b2b2b2b2', 'Fix typo on main')],
@@ -389,9 +411,15 @@ describe('App: branch compare → changed files → diff editor beside', () => {
     },
   };
 
+  const requestCompare = () => {
+    hostSends(compareDataMsg);
+    fireEvent.click(screen.getByText('Compare'));
+    fireEvent.click(screen.getByText('feature/payments'));
+  };
+
   it('renders the ahead/behind sections in the commit list and the files in the left pane', () => {
     render(<App />);
-    hostSends(dataMsg);
+    requestCompare();
     hostSends(compareMsg);
 
     const sections = [...document.querySelectorAll('#rows .compare-section')].map(
@@ -407,19 +435,20 @@ describe('App: branch compare → changed files → diff editor beside', () => {
     const changes = document.querySelector('#changes')!;
     expect(changes.textContent).toContain('Changes (1)');
     expect(changes.textContent).toContain('main ⇄ feature/payments');
+    expect(changes.textContent).not.toContain('refs/heads');
     expect(changes.querySelector('.file-node')).toBeTruthy();
   });
 
   it('clicking a compared file asks the host to diff merge-base vs target', () => {
     render(<App />);
-    hostSends(dataMsg);
+    requestCompare();
     hostSends(compareMsg);
     postMock.mockClear();
 
     fireEvent.click(screen.getByText('engine.js'));
     expect(postMock).toHaveBeenCalledWith({
       type: 'openFileDiff',
-      hash: 'feature/payments',
+      hash: 'refs/heads/feature/payments',
       parent: 'feedc0defeedc0defeed',
       path: 'src/engine.js',
     });
@@ -427,12 +456,18 @@ describe('App: branch compare → changed files → diff editor beside', () => {
 
   it('clicking a compare commit shows its own files on top, ✕ returns to the comparison', () => {
     render(<App />);
-    hostSends(dataMsg);
+    requestCompare();
     hostSends(compareMsg);
 
     fireEvent.click(screen.getByText('Add payments'));
-    hostSends(detailMsg);
-    expect(document.querySelector('#changes')!.textContent).toContain('dc3b7844');
+    hostSends({
+      ...detailMsg,
+      detail: {
+        ...detailMsg.detail,
+        commit: commit('a1a1a1a1a1a1a1a1a1a1', 'Add payments'),
+      },
+    } as HostMessage);
+    expect(document.querySelector('#changes')!.textContent).toContain('a1a1a1a1');
 
     fireEvent.click(screen.getByTitle('Close changed files'));
     expect(document.querySelector('#changes')!.textContent).toContain(
@@ -442,7 +477,7 @@ describe('App: branch compare → changed files → diff editor beside', () => {
 
   it('Escape dismisses the comparison and restores the branch history', () => {
     render(<App />);
-    hostSends(dataMsg);
+    requestCompare();
     hostSends(compareMsg);
     act(() => {
       fireEvent.keyDown(document, { key: 'Escape' });

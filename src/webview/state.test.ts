@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { initialState, reducer, type AppState } from './state';
 import type { Branch, Commit, HostMessage } from './types';
 
-const branch = (over: Partial<Omit<Branch, 'refShort'>>): Omit<Branch, 'refShort'> => ({
-  refName: 'refs/heads/main',
-  name: 'main',
-  commit: 'abc',
-  kind: 'local',
-  isHead: false,
-  ...over,
-});
+const branch = (over: Partial<Omit<Branch, 'refShort'>>): Omit<Branch, 'refShort'> => {
+  const name = over.name ?? 'main';
+  const kind = over.kind ?? 'local';
+  return {
+    refName: over.refName ?? (kind === 'remote' ? `refs/remotes/${name}` : `refs/heads/${name}`),
+    name,
+    commit: 'abc',
+    kind,
+    isHead: false,
+    ...over,
+  };
+};
 
 const commit = (hash: string): Commit => ({
   hash,
@@ -38,7 +42,7 @@ const host = (state: AppState, msg: HostMessage) => reducer(state, { type: 'host
 describe('reducer: host messages', () => {
   it('adopts a data payload and computes refShort identifiers', () => {
     const s = host(initialState, dataMsg());
-    expect(s.branches.map((b) => b.refShort)).toEqual(['local:main', 'local:dev']);
+    expect(s.branches.map((b) => b.refShort)).toEqual(['refs/heads/main', 'refs/heads/dev']);
     expect(s.current).toBe('main');
     expect(s.tracking).toEqual({ ahead: 1, behind: 2 });
     expect(s.commits).toHaveLength(1);
@@ -46,7 +50,7 @@ describe('reducer: host messages', () => {
 
   it('moves the selection onto the focused ref', () => {
     const s = host(initialState, dataMsg({ focused: 'dev' }));
-    expect(s.selectedRef).toBe('local:dev');
+    expect(s.selectedRef).toBe('refs/heads/dev');
     expect(s.selectedName).toBe('dev');
     expect(s.selectedHash).toBeNull();
   });
@@ -79,7 +83,8 @@ describe('reducer: host messages', () => {
 
   it('replaces commits on branchCommits without touching branches', () => {
     let s = host(initialState, dataMsg());
-    s = host(s, { type: 'branchCommits', ref: 'dev', commits: [commit('x'), commit('y')] });
+    s = reducer(s, { type: 'ui/selectBranch', branch: s.branches[1] });
+    s = host(s, { type: 'branchCommits', ref: 'refs/heads/dev', commits: [commit('x'), commit('y')] });
     expect(s.commits).toHaveLength(2);
     expect(s.branches).toHaveLength(2);
   });
@@ -93,7 +98,8 @@ describe('reducer: host messages', () => {
     });
     s = reducer(s, { type: 'ui/selectFile', path: 'src/a.ts' });
 
-    s = host(s, { type: 'branchCommits', ref: 'dev', commits: [commit('x')] });
+    s = reducer(s, { type: 'ui/selectBranch', branch: s.branches[1] });
+    s = host(s, { type: 'branchCommits', ref: 'refs/heads/dev', commits: [commit('x')] });
 
     expect(s.selectedHash).toBeNull();
     expect(s.commitFiles).toBeNull();
@@ -103,7 +109,8 @@ describe('reducer: host messages', () => {
   it('tracks hasMore from data and branchCommits payloads', () => {
     let s = host(initialState, dataMsg({ hasMore: true }));
     expect(s.hasMore).toBe(true);
-    s = host(s, { type: 'branchCommits', ref: 'dev', commits: [commit('x')] });
+    s = reducer(s, { type: 'ui/selectBranch', branch: s.branches[1] });
+    s = host(s, { type: 'branchCommits', ref: 'refs/heads/dev', commits: [commit('x')] });
     expect(s.hasMore).toBe(false); // omitted means no more pages
   });
 
@@ -133,12 +140,26 @@ describe('reducer: host messages', () => {
       branch: { ...branch({ name: 'dev' }), refShort: 'local:dev' },
     });
     expect(s.hasMore).toBe(false);
-    s = host(s, { type: 'branchCommits', ref: 'dev', commits: [commit('x')], hasMore: true });
+    s = host(s, { type: 'branchCommits', ref: 'local:dev', commits: [commit('x')], hasMore: true });
     expect(s.hasMore).toBe(true);
+  });
+
+  it('drops branchCommits that do not match the current selected ref', () => {
+    let s = host(initialState, dataMsg());
+    s = reducer(s, { type: 'ui/selectBranch', branch: s.branches[1] });
+    s = host(s, {
+      type: 'branchCommits',
+      ref: 'refs/heads/main',
+      commits: [commit('stale')],
+      hasMore: true,
+    });
+    expect(s.commits.map((c) => c.hash)).toEqual(['c1']);
+    expect(s.loadingMore).toBe(false);
   });
 
   it('fills the changed-files pane on commitDetail and resets the file selection', () => {
     let s = reducer(initialState, { type: 'ui/selectFile', path: 'stale.txt' });
+    s = reducer(s, { type: 'ui/selectCommit', hash: 'c1' });
     s = host(s, {
       type: 'commitDetail',
       detail: { commit: commit('c1'), body: '', files: [{ status: 'M', path: 'src/a.ts' }] },
@@ -148,8 +169,31 @@ describe('reducer: host messages', () => {
     expect(s.selectedFile).toBeNull();
   });
 
+  it('drops commitDetail responses that do not match the pending request', () => {
+    let s = reducer(initialState, { type: 'ui/selectCommit', hash: 'c1' });
+    s = reducer(s, { type: 'ui/selectCommit', hash: 'c2' });
+    s = host(s, {
+      type: 'commitDetail',
+      detail: { commit: commit('c1'), body: '', files: [{ status: 'M', path: 'stale.ts' }] },
+    });
+    expect(s.commitFiles).toBeNull();
+    expect(s.selectedHash).toBe('c2');
+  });
+
+  it('keeps an in-flight commit detail request across a data refresh', () => {
+    let s = host(initialState, dataMsg());
+    s = reducer(s, { type: 'ui/selectCommit', hash: 'c1' });
+    s = host(s, dataMsg({ focused: null }));
+    s = host(s, {
+      type: 'commitDetail',
+      detail: { commit: commit('c1'), body: '', files: [{ status: 'M', path: 'src/a.ts' }] },
+    });
+    expect(s.commitFiles?.commit.hash).toBe('c1');
+  });
+
   it('enters compare mode and disarms the compare base on compareResult', () => {
     let s = reducer(initialState, { type: 'ui/setCompareBase', base: 'main' });
+    s = reducer(s, { type: 'ui/requestCompare', base: 'main', target: 'dev' });
     s = host(s, {
       type: 'compareResult',
       base: 'main',
@@ -162,12 +206,50 @@ describe('reducer: host messages', () => {
     expect(s.compareBase).toBeNull();
   });
 
+  it('drops compareResult responses that do not match the pending compare', () => {
+    let s = reducer(initialState, {
+      type: 'ui/requestCompare',
+      base: 'refs/heads/main',
+      target: 'refs/heads/newer',
+    });
+    s = host(s, {
+      type: 'compareResult',
+      base: 'refs/heads/main',
+      target: 'refs/heads/older',
+      result: { ahead: [commit('old')], behind: [], files: [], mergeBase: 'mb' },
+    });
+    expect(s.compare).toBeNull();
+    expect(s.pendingCompare).toEqual({
+      base: 'refs/heads/main',
+      target: 'refs/heads/newer',
+    });
+  });
+
+  it('keeps an in-flight compare request across a data refresh', () => {
+    let s = reducer(initialState, {
+      type: 'ui/requestCompare',
+      base: 'refs/heads/main',
+      target: 'refs/heads/dev',
+    });
+    s = host(s, dataMsg({ focused: null }));
+    s = host(s, {
+      type: 'compareResult',
+      base: 'refs/heads/main',
+      target: 'refs/heads/dev',
+      result: { ahead: [], behind: [commit('b1')], files: [], mergeBase: 'mb' },
+    });
+    expect(s.compare?.base).toBe('refs/heads/main');
+    expect(s.compare?.target).toBe('refs/heads/dev');
+  });
+
   it('drops a previously shown commit detail when a comparison arrives', () => {
-    let s = host(initialState, {
+    let s = reducer(initialState, { type: 'ui/selectCommit', hash: 'c1' });
+    s = host(s, {
       type: 'commitDetail',
       detail: { commit: commit('c1'), body: '', files: [{ status: 'M', path: 'src/a.ts' }] },
     });
     s = reducer(s, { type: 'ui/selectFile', path: 'src/a.ts' });
+    s = reducer(s, { type: 'ui/requestCompare', base: 'main', target: 'dev' });
     s = host(s, {
       type: 'compareResult',
       base: 'main',
@@ -184,7 +266,7 @@ describe('reducer: UI actions', () => {
     let s = host(initialState, dataMsg());
     s = reducer(s, { type: 'ui/selectCommit', hash: 'c1' });
     s = reducer(s, { type: 'ui/selectBranch', branch: s.branches[1] });
-    expect(s.selectedRef).toBe('local:dev');
+    expect(s.selectedRef).toBe('refs/heads/dev');
     expect(s.selectedHash).toBeNull();
   });
 
@@ -206,7 +288,8 @@ describe('reducer: UI actions', () => {
   });
 
   it('closes the comparison on closeCompare (Escape)', () => {
-    let s = host(initialState, {
+    let s = reducer(initialState, { type: 'ui/requestCompare', base: 'main', target: 'dev' });
+    s = host(s, {
       type: 'compareResult',
       base: 'main',
       target: 'dev',
@@ -230,13 +313,15 @@ describe('reducer: UI actions', () => {
   });
 
   it('closeFiles peels a commit detail first, then the comparison', () => {
-    let s = host(initialState, {
+    let s = reducer(initialState, { type: 'ui/requestCompare', base: 'main', target: 'dev' });
+    s = host(s, {
       type: 'compareResult',
       base: 'main',
       target: 'dev',
       result: { ahead: [], behind: [], files: [{ status: 'M', path: 'a.ts' }], mergeBase: 'mb' },
     });
     // Clicking a compare commit shows its files on top of the comparison.
+    s = reducer(s, { type: 'ui/selectCommit', hash: 'c1' });
     s = host(s, {
       type: 'commitDetail',
       detail: { commit: commit('c1'), body: '', files: [{ status: 'M', path: 'src/a.ts' }] },
@@ -249,7 +334,8 @@ describe('reducer: UI actions', () => {
   });
 
   it('tracks the selected changed file', () => {
-    let s = host(initialState, {
+    let s = reducer(initialState, { type: 'ui/selectCommit', hash: 'c1' });
+    s = host(s, {
       type: 'commitDetail',
       detail: { commit: commit('c1'), body: '', files: [{ status: 'M', path: 'src/a.ts' }] },
     });
@@ -258,7 +344,8 @@ describe('reducer: UI actions', () => {
   });
 
   it('closes the changed-files pane and clears the file selection', () => {
-    let s = host(initialState, {
+    let s = reducer(initialState, { type: 'ui/selectCommit', hash: 'c1' });
+    s = host(s, {
       type: 'commitDetail',
       detail: { commit: commit('c1'), body: '', files: [{ status: 'M', path: 'src/a.ts' }] },
     });

@@ -1,6 +1,7 @@
 import React from 'react';
 import { post } from '../vscodeApi';
 import { PULL_STRATEGY_LABELS, type PullStrategy } from '../types';
+import { displayRefName } from '../format';
 
 interface ToolbarProps {
   compareBase: string | null;
@@ -49,7 +50,7 @@ export function Toolbar({ compareBase, pullStrategy, onToggleCompare, onPullStra
       <Sep />
       <TbButton label="New Branch" icon="＋" onClick={() => post({ type: 'createBranch' })} />
       <TbButton
-        label={compareBase ? `Comparing: ${compareBase} ✕` : 'Compare'}
+        label={compareBase ? `Comparing: ${displayRefName(compareBase)} ✕` : 'Compare'}
         icon="⇄"
         title="Pick a base branch, then click another branch to compare"
         onClick={onToggleCompare}

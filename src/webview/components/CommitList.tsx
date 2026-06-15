@@ -3,7 +3,7 @@ import type { Commit, ColumnKey, ColumnWidths } from '../types';
 import type { CompareState } from '../state';
 import { computeGraph, edgePath, laneX, rowY, LANE_W, PAD, ROW_H } from '../graph';
 import { COLUMN_DEFS, MIN_COL_W, applyColumnTemplate } from '../columns';
-import { formatDate, initials } from '../format';
+import { displayRefName, formatDate, initials } from '../format';
 
 interface CommitListProps {
   commits: Commit[];
@@ -163,6 +163,8 @@ function Rows(props: CommitListProps) {
  */
 function CompareRows(props: CommitListProps & { compare: CompareState }) {
   const { base, target, result } = props.compare;
+  const baseLabel = displayRefName(base);
+  const targetLabel = displayRefName(target);
 
   // The graph column only holds the ↑/↓ marker here; keep it narrow.
   useEffect(() => {
@@ -184,8 +186,8 @@ function CompareRows(props: CommitListProps & { compare: CompareState }) {
 
   return (
     <div id="rows">
-      {section(`In ${target}, not in ${base}`, '↑', result.ahead)}
-      {section(`In ${base}, not in ${target}`, '↓', result.behind)}
+      {section(`In ${targetLabel}, not in ${baseLabel}`, '↑', result.ahead)}
+      {section(`In ${baseLabel}, not in ${targetLabel}`, '↓', result.behind)}
     </div>
   );
 }

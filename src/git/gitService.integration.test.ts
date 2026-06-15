@@ -241,13 +241,13 @@ describe('real git: commit change information', () => {
       expect(d.body).toBe('');
     });
 
-    it('reports modify, delete, and a detected rename as old → new', async () => {
+    it('reports modify, delete, and a detected rename structurally', async () => {
       const d = await repo.service.getCommitDetail(renameHash);
       expect(d.files).toEqual(
         expect.arrayContaining([
           { status: 'M', path: 'a.txt' },
           { status: 'D', path: 'docs/read me.md' },
-          { status: 'R100', path: 'src/util/helper.ts → src/util/helpers.ts' },
+          { status: 'R100', oldPath: 'src/util/helper.ts', path: 'src/util/helpers.ts' },
         ])
       );
       expect(d.files).toHaveLength(3);

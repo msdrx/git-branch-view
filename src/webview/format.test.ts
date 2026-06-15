@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { branchDisplayName, formatDate, initials } from './format';
+import { branchDisplayName, displayRefName, formatDate, initials } from './format';
 
 describe('initials', () => {
   it('takes the first letters of the first two words, uppercased', () => {
@@ -40,5 +40,17 @@ describe('branchDisplayName', () => {
     expect(branchDisplayName({ kind: 'remote', name: 'origin/feature/login' })).toBe(
       'feature/login'
     );
+  });
+});
+
+describe('displayRefName', () => {
+  it('strips full local and remote ref prefixes for user-facing labels', () => {
+    expect(displayRefName('refs/heads/main')).toBe('main');
+    expect(displayRefName('refs/remotes/origin/feature/login')).toBe('origin/feature/login');
+  });
+
+  it('keeps non-ref labels unchanged', () => {
+    expect(displayRefName('main')).toBe('main');
+    expect(displayRefName('deadbeef')).toBe('deadbeef');
   });
 });

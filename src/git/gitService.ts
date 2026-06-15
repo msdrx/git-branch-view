@@ -83,7 +83,7 @@ export interface CompareResult {
   /** Commits in `base` not in `target`. */
   behind: CommitInfo[];
   /** Files changed between base and target. */
-  files: { status: string; path: string }[];
+  files: FileChangeInfo[];
   /**
    * The merge-base of the two refs — the diff baseline. The file list is a
    * three-dot diff (base...target), so per-file diffs must use this as their
@@ -95,7 +95,15 @@ export interface CompareResult {
 export interface CommitDetail {
   commit: CommitInfo;
   body: string;
-  files: { status: string; path: string }[];
+  files: FileChangeInfo[];
+}
+
+export interface FileChangeInfo {
+  status: string;
+  /** New/current path. For renames/copies, this is the destination path. */
+  path: string;
+  /** Original path for rename/copy records. */
+  oldPath?: string;
 }
 
 /**
@@ -453,8 +461,9 @@ export class GitService {
     // So checkout never uses the marker; like `checkout -b`, it validates the
     // ref isn't option-looking instead — git forbids ref names starting with
     // '-', so this never refuses a legitimate branch.
-    assertNotOption(branch, 'branch');
-    await this.git(`checkout ${quote(branch)}`);
+    const target = localBranchName(branch);
+    assertNotOption(target, 'branch');
+    await this.git(`checkout ${quote(target)}`);
   }
 
   async createBranch(name: string, startPoint?: string): Promise<void> {
@@ -470,7 +479,8 @@ export class GitService {
   }
 
   async deleteBranch(name: string, force = false): Promise<void> {
-    await this.git(`branch ${force ? '-D' : '-d'} ${await this.refBarrier(name)}${quote(name)}`);
+    const branch = localBranchName(name);
+    await this.git(`branch ${force ? '-D' : '-d'} ${await this.refBarrier(branch)}${quote(branch)}`);
   }
 
   async merge(branch: string): Promise<void> {
@@ -520,13 +530,13 @@ export class GitService {
    * names with spaces, tabs or non-ASCII bytes arrive verbatim (the line
    * format would escape them as `"na\303\257ve.txt"` under LC_ALL=C). The
    * stream is `status NUL path NUL ...`; rename/copy records (`R###`/`C###`)
-   * carry two paths, joined here as "old → new" for display and for the diff
-   * opener, which splits on the arrow.
+   * carry two paths, preserved structurally so literal path text is never
+   * confused with a display separator.
    */
-  private async parseNameStatus(args: string): Promise<{ status: string; path: string }[]> {
+  private async parseNameStatus(args: string): Promise<FileChangeInfo[]> {
     const out = await this.git(args);
     const tokens = out.split(FIELD_SEP);
-    const files: { status: string; path: string }[] = [];
+    const files: FileChangeInfo[] = [];
     for (let i = 0; i + 1 < tokens.length; ) {
       const status = tokens[i++];
       if (!status.trim()) {
@@ -534,7 +544,7 @@ export class GitService {
       }
       const path = tokens[i++];
       if (status[0] === 'R' || status[0] === 'C') {
-        files.push({ status, path: `${path} → ${tokens[i++]}` });
+        files.push({ status, oldPath: path, path: tokens[i++] });
       } else {
         files.push({ status, path });
       }
@@ -600,4 +610,9 @@ export function assertNotOption(arg: string, label = 'argument'): void {
   if (arg.startsWith('-')) {
     throw new Error(`Refusing unsafe ${label}: must not begin with "-" (got "${arg}").`);
   }
+}
+
+/** Convert a full local ref identity into the branch name git checkout/branch expect. */
+export function localBranchName(ref: string): string {
+  return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref;
 }

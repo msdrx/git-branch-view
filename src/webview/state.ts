@@ -37,20 +37,29 @@ export type CompareState = {
   result: CompareResult;
 };
 
+interface PendingCompare {
+  base: string;
+  target: string;
+}
+
 export interface AppState {
   branches: Branch[];
   commits: Commit[];
   tracking: Tracking;
   current: string;
-  /** `kind:name` of the selected tree node (see Branch.refShort). */
+  /** Full ref name of the selected tree node (see Branch.refShort). */
   selectedRef: string | null;
   /** Plain ref name of the selected branch (shown in the right header). */
   selectedName: string | null;
   selectedHash: string | null;
+  /** Commit detail request currently in flight, used to drop stale responses. */
+  pendingCommitHash: string | null;
   /** Collapsed tree groups, keyed by group key. */
   collapsed: Record<string, boolean>;
   /** Base ref while compare mode is armed, else null. */
   compareBase: string | null;
+  /** Compare request currently in flight, used to drop stale host responses. */
+  pendingCompare: PendingCompare | null;
   pullStrategy: PullStrategy;
   columnWidths: ColumnWidths;
   menu: MenuState | null;
@@ -75,8 +84,10 @@ export const initialState: AppState = {
   selectedRef: null,
   selectedName: null,
   selectedHash: null,
+  pendingCommitHash: null,
   collapsed: {},
   compareBase: null,
+  pendingCompare: null,
   pullStrategy: 'merge',
   columnWidths: {},
   menu: null,
@@ -94,6 +105,7 @@ export type Action =
   | { type: 'ui/selectCommit'; hash: string }
   | { type: 'ui/toggleGroup'; key: string }
   | { type: 'ui/setCompareBase'; base: string | null }
+  | { type: 'ui/requestCompare'; base: string; target: string }
   | { type: 'ui/openMenu'; menu: MenuState }
   | { type: 'ui/closeMenu' }
   | { type: 'ui/closeCompare' }
@@ -116,19 +128,31 @@ export function reducer(state: AppState, action: Action): AppState {
         selectedRef: action.branch.refShort,
         selectedName: action.branch.name,
         selectedHash: null,
+        pendingCommitHash: null,
         compare: null,
+        commitFiles: null,
+        selectedFile: null,
+        pendingCompare: null,
         hasMore: false,
         loadingMore: false,
       };
     case 'ui/selectCommit':
-      return { ...state, selectedHash: action.hash };
+      return {
+        ...state,
+        selectedHash: action.hash,
+        pendingCommitHash: action.hash,
+        commitFiles: null,
+        selectedFile: null,
+      };
     case 'ui/toggleGroup':
       return {
         ...state,
         collapsed: { ...state.collapsed, [action.key]: !state.collapsed[action.key] },
       };
     case 'ui/setCompareBase':
-      return { ...state, compareBase: action.base };
+      return { ...state, compareBase: action.base, pendingCompare: null };
+    case 'ui/requestCompare':
+      return { ...state, pendingCompare: { base: action.base, target: action.target } };
     case 'ui/openMenu':
       return { ...state, menu: action.menu };
     case 'ui/closeMenu':
@@ -159,10 +183,10 @@ export function reducer(state: AppState, action: Action): AppState {
 function handleHostMessage(state: AppState, msg: HostMessage): AppState {
   switch (msg.type) {
     case 'data': {
-      // Pre-compute a short ref identifier for selection tracking.
+      // Pre-compute a stable ref identifier for selection tracking.
       const branches: Branch[] = msg.branches.map((b) => ({
         ...b,
-        refShort: `${b.kind}:${b.name}`,
+        refShort: b.refName,
       }));
       const next: AppState = {
         ...state,
@@ -180,7 +204,7 @@ function handleHostMessage(state: AppState, msg: HostMessage): AppState {
       // history is shown (the current branch by default, or one just checked
       // out — including from a terminal).
       if (msg.focused) {
-        const fb = branches.find((b) => b.name === msg.focused);
+        const fb = branches.find((b) => b.refName === msg.focused || b.name === msg.focused);
         next.selectedRef = fb ? fb.refShort : null;
         next.selectedName = fb ? fb.name : msg.focused;
         next.selectedHash = null;
@@ -188,12 +212,16 @@ function handleHostMessage(state: AppState, msg: HostMessage): AppState {
       return next;
     }
     case 'branchCommits':
+      if (state.selectedRef !== msg.ref) {
+        return { ...state, loadingMore: false };
+      }
       return {
         ...state,
         commits: msg.commits,
         hasMore: msg.hasMore ?? false,
         loadingMore: false,
         selectedHash: null,
+        pendingCommitHash: null,
         commitFiles: null,
         selectedFile: null,
         error: null,
@@ -213,11 +241,21 @@ function handleHostMessage(state: AppState, msg: HostMessage): AppState {
         error: null,
       };
     case 'commitDetail':
+      if (state.pendingCommitHash !== msg.detail.commit.hash) {
+        return state;
+      }
       // Shown as the changed-files tree under the branch tree; selecting a
       // file there opens its diff in a split editor beside the panel. A newly
       // selected commit resets the file selection.
-      return { ...state, commitFiles: msg.detail, selectedFile: null };
+      return { ...state, commitFiles: msg.detail, selectedFile: null, pendingCommitHash: null };
     case 'compareResult':
+      if (
+        !state.pendingCompare ||
+        state.pendingCompare.base !== msg.base ||
+        state.pendingCompare.target !== msg.target
+      ) {
+        return state;
+      }
       // Enter compare mode: the files render in the left Changes pane, the
       // ahead/behind commits replace the right list. Any commit detail shown
       // before is dropped so the pane shows the comparison's files.
@@ -225,9 +263,11 @@ function handleHostMessage(state: AppState, msg: HostMessage): AppState {
         ...state,
         compare: { base: msg.base, target: msg.target, result: msg.result },
         compareBase: null,
+        pendingCompare: null,
         commitFiles: null,
         selectedFile: null,
         selectedHash: null,
+        pendingCommitHash: null,
         // hasMore is left alone: the underlying branch history (and its
         // paging) comes back when the comparison is dismissed. The scroll
         // handler doesn't request pages while compare mode is showing.

@@ -80,7 +80,7 @@ export class BranchesProvider implements vscode.TreeDataProvider<BranchTreeNode>
       return inGroup.map((info) => ({
         kind: 'branch',
         info,
-        focused: this.focused === info.name,
+        focused: this.focused === info.refName || this.focused === info.name,
       }));
     }
     return [];

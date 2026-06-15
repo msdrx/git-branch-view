@@ -1,6 +1,7 @@
 import React from 'react';
 import { post } from '../vscodeApi';
 import type { Tracking } from '../types';
+import { displayRefName } from '../format';
 
 interface RightHeaderProps {
   branchName: string;
@@ -22,7 +23,7 @@ export function RightHeader({ branchName, tracking, compare }: RightHeaderProps)
         <span className="title">
           {compare ? (
             <>
-              Compare: {compare.base} ⇄ {compare.target}
+              Compare: {displayRefName(compare.base)} ⇄ {displayRefName(compare.target)}
             </>
           ) : (
             <>Branch: {branchName || '(none)'}</>

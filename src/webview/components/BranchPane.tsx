@@ -135,17 +135,16 @@ interface DirNode {
   files: FileChange[];
 }
 
-/** A rename arrives as "old → new"; the file lives at the new path. */
-export function displayPath(path: string): string {
-  const parts = path.split(' → ');
-  return parts[parts.length - 1];
+/** A rename/copy record lives at its new path. */
+export function displayPath(file: Pick<FileChange, 'path' | 'oldPath'> | string): string {
+  return typeof file === 'string' ? file : file.path;
 }
 
 /** Nest the flat changed-file list into a directory tree. */
 export function buildFileTree(files: FileChange[]): DirNode {
   const root: DirNode = { dirs: new Map(), files: [] };
   for (const f of files) {
-    const segments = displayPath(f.path).split('/');
+    const segments = displayPath(f).split('/');
     let node = root;
     for (const seg of segments.slice(0, -1)) {
       let child = node.dirs.get(seg);
@@ -286,7 +285,7 @@ function ChangesPane({ changes, selectedFile, onSelectFile, onClose }: ChangesPa
         );
       })}
       {node.files.map((f) => {
-        const full = displayPath(f.path);
+        const full = displayPath(f);
         const name = full.split('/').pop();
         const classes = ['tree-node', 'file-node'];
         if (selectedFile === f.path) {
@@ -297,7 +296,7 @@ function ChangesPane({ changes, selectedFile, onSelectFile, onClose }: ChangesPa
             key={f.path}
             className={classes.join(' ')}
             style={{ paddingLeft: 22 + depth * 16 }}
-            title={`${f.status}  ${f.path}`}
+            title={`${f.status}  ${f.oldPath ? `${f.oldPath} → ` : ''}${f.path}`}
             onClick={() => onSelectFile(f)}
           >
             <span className={`status status-${f.status[0]}`}>{f.status[0]}</span>

@@ -15,7 +15,7 @@ export interface Branch {
   ahead?: number;
   behind?: number;
   isHead: boolean;
-  /** `kind:name` — selection identity in the tree (computed webview-side). */
+  /** Full-ref selection identity in the tree (computed webview-side). */
   refShort: string;
 }
 
@@ -40,7 +40,10 @@ export interface Tracking {
 
 export interface FileChange {
   status: string;
+  /** New/current path. For renames/copies, this is the destination path. */
   path: string;
+  /** Original path for rename/copy records. */
+  oldPath?: string;
 }
 
 export interface CommitDetail {
@@ -108,7 +111,7 @@ export type WebviewMessage =
   /** Ask for the next page of the focused history, starting at `skip`. */
   | { type: 'moreCommits'; skip: number }
   | { type: 'commitDetail'; hash: string }
-  | { type: 'openFileDiff'; hash: string; parent: string | null; path: string }
+  | { type: 'openFileDiff'; hash: string; parent: string | null; path: string; oldPath?: string }
   | { type: 'compare'; base: string; target: string }
   | { type: 'checkout'; branch: string }
   | { type: 'createBranch'; startPoint?: string }

@@ -8,6 +8,7 @@ import {
   setPullStrategy,
 } from '../git/gitActions';
 import { BRANCH_VIEW_SCHEME, fileAtRefUri, refLabel } from '../git/gitContentProvider';
+import { displayRefName } from '../refName';
 import { sanitizeColumnWidths } from './columnWidths';
 
 /**
@@ -314,10 +315,10 @@ export class BranchViewPanel {
           if (!root) {
             break;
           }
-          // Renames arrive as "old → new"; diff old on the left, new on right.
-          const [oldPath, newPath] = msg.path.includes(' → ')
-            ? msg.path.split(' → ')
-            : [msg.path, msg.path];
+          // Renames carry their old path separately; literal path text is left
+          // untouched.
+          const oldPath = msg.oldPath ?? msg.path;
+          const newPath = msg.path;
           // First diff of a session: shrink the panel AND pre-create the wide
           // group the diff will open into, in a SINGLE layout change, so the
           // panel resizes exactly once. (Opening the diff Beside first and
@@ -366,18 +367,18 @@ export class BranchViewPanel {
             !(await ensureClean(
               git,
               `You have uncommitted changes in the working directory. ` +
-                `Commit them before checking out "${msg.branch}".`
+                `Commit them before checking out "${displayRefName(msg.branch)}".`
             ))
           ) {
             break;
           }
           await git.checkout(msg.branch);
-          vscode.window.showInformationMessage(`Checked out ${msg.branch}`);
+          vscode.window.showInformationMessage(`Checked out ${displayRefName(msg.branch)}`);
           // Focus the graph on the branch (or commit) we just switched to so
           // its history shows immediately instead of the unchanged --all view.
           // loadAll() sees HEAD move and updates lastCurrent, so this focus
           // survives the move.
-          this.lastCurrent = msg.branch;
+          this.lastCurrent = await git.getCurrentBranch();
           this.setFocus(msg.branch);
           await this.loadAll();
           break;
@@ -394,7 +395,7 @@ export class BranchViewPanel {
             break;
           }
           const name = await vscode.window.showInputBox({
-            prompt: `New branch from ${msg.startPoint ?? 'HEAD'}`,
+            prompt: `New branch from ${displayRefName(msg.startPoint) || 'HEAD'}`,
             placeHolder: 'feature/my-branch',
           });
           if (name) {
@@ -409,7 +410,7 @@ export class BranchViewPanel {
 
         case 'deleteBranch': {
           const ok = await vscode.window.showWarningMessage(
-            `Delete branch ${msg.branch}?`,
+            `Delete branch ${displayRefName(msg.branch)}?`,
             { modal: true },
             'Delete'
           );

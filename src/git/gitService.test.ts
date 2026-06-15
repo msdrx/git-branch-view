@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   GitService,
   assertNotOption,
+  localBranchName,
   normalizeRefArgument,
   parseRefs,
   parseTrack,
@@ -284,7 +285,7 @@ describe('GitService.getCommitDetail', () => {
     expect(d.files).toEqual([{ status: 'A', path: 'a.txt' }]);
   });
 
-  it('joins rename and copy records as "old → new" and keeps the score', async () => {
+  it('preserves rename and copy records structurally and keeps the score', async () => {
     const { git } = detailGit({
       meta: meta('aaa', 'p1'),
       files: [
@@ -295,8 +296,8 @@ describe('GitService.getCommitDetail', () => {
     });
     const d = await git.getCommitDetail('aaa');
     expect(d.files).toEqual([
-      { status: 'R100', path: 'src/old name.ts → src/new name.ts' },
-      { status: 'C75', path: 'lib/base.ts → lib/copy.ts' },
+      { status: 'R100', oldPath: 'src/old name.ts', path: 'src/new name.ts' },
+      { status: 'C75', oldPath: 'lib/base.ts', path: 'lib/copy.ts' },
       { status: 'M', path: 'kept.ts' },
     ]);
   });
@@ -334,6 +335,11 @@ describe('GitService.getFileAtRef', () => {
 });
 
 describe('argument/option injection hardening', () => {
+  it('localBranchName unwraps full local refs for checkout/branch commands', () => {
+    expect(localBranchName('refs/heads/feature/x')).toBe('feature/x');
+    expect(localBranchName('refs/remotes/origin/main')).toBe('refs/remotes/origin/main');
+  });
+
   it('assertNotOption rejects dash-led values and accepts normal ones', () => {
     expect(() => assertNotOption('--upload-pack=touch x', 'branch name')).toThrow(/branch name/);
     expect(() => assertNotOption('-d')).toThrow();
@@ -392,6 +398,12 @@ describe('argument/option injection hardening', () => {
     await git.checkout('feature/test');
     expect(commands[0]).toBe(`git checkout 'feature/test'`);
     expect(commands[0]).not.toContain('--end-of-options');
+  });
+
+  it('checkout accepts a full local ref without detaching HEAD', async () => {
+    const { git, commands } = fakeGit({ 'git checkout': '' }, '2.51.0');
+    await git.checkout('refs/heads/feature/test');
+    expect(commands[0]).toBe(`git checkout 'feature/test'`);
   });
 
   it('checkout rejects an option-looking branch instead of shelling out', async () => {

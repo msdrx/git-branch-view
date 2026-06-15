@@ -11,6 +11,7 @@ import {
 import { BranchesProvider, BranchTreeNode } from './branchesProvider';
 import { CommitsProvider, CommitTreeNode } from './commitsProvider';
 import { fileAtRefUri, refLabel } from '../git/gitContentProvider';
+import { displayRefName } from '../refName';
 
 /**
  * The native (non-webview) front-end: two VS Code tree views — Branches and
@@ -160,26 +161,26 @@ export class NativeBranchView implements vscode.Disposable {
 
     reg('gitBranchView.native.focusBranch', (node?: BranchTreeNode) => {
       if (node?.kind === 'branch') {
-        this.setFocus(node.info.name);
+        this.setFocus(node.info.refName);
         this.loadedCount = 0; // a new history starts back at one page
         void this.refresh();
       }
     });
     reg('gitBranchView.native.loadMore', () => this.loadMore());
     reg('gitBranchView.native.checkout', (node?: BranchTreeNode) =>
-      this.onBranch(node, (git, b) => this.checkout(git, b.name))
+      this.onBranch(node, (git, b) => this.checkout(git, b.refName))
     );
     reg('gitBranchView.native.newBranch', (node?: BranchTreeNode) =>
-      this.newBranch(node?.kind === 'branch' ? node.info.name : undefined)
+      this.newBranch(node?.kind === 'branch' ? node.info.refName : undefined)
     );
     reg('gitBranchView.native.merge', (node?: BranchTreeNode) =>
-      this.onBranch(node, (git, b) => this.merge(git, b.name))
+      this.onBranch(node, (git, b) => this.merge(git, b.refName))
     );
     reg('gitBranchView.native.delete', (node?: BranchTreeNode) =>
-      this.onBranch(node, (git, b) => this.deleteBranch(git, b.name))
+      this.onBranch(node, (git, b) => this.deleteBranch(git, b.refName))
     );
     reg('gitBranchView.native.compare', (node?: BranchTreeNode) =>
-      this.onBranch(node, (git, b) => this.compare(git, b.name))
+      this.onBranch(node, (git, b) => this.compare(git, b.refName))
     );
 
     reg('gitBranchView.native.fetch', () => this.doGit((git) => git.fetch()));
@@ -243,14 +244,14 @@ export class NativeBranchView implements vscode.Disposable {
       !(await ensureClean(
         git,
         `You have uncommitted changes in the working directory. ` +
-          `Commit them before checking out "${target}".`
+          `Commit them before checking out "${displayRefName(target)}".`
       ))
     ) {
       return;
     }
     await git.checkout(target);
-    vscode.window.showInformationMessage(`Checked out ${target}`);
-    this.lastCurrent = target;
+    vscode.window.showInformationMessage(`Checked out ${displayRefName(target)}`);
+    this.lastCurrent = await git.getCurrentBranch();
     this.setFocus(target);
     await this.refresh();
   }
@@ -271,7 +272,7 @@ export class NativeBranchView implements vscode.Disposable {
         return;
       }
       const name = await vscode.window.showInputBox({
-        prompt: `New branch from ${startPoint ?? 'HEAD'}`,
+        prompt: `New branch from ${displayRefName(startPoint) || 'HEAD'}`,
         placeHolder: 'feature/my-branch',
       });
       if (!name) {
@@ -293,7 +294,7 @@ export class NativeBranchView implements vscode.Disposable {
 
   private async deleteBranch(git: GitService, branch: string): Promise<void> {
     const ok = await vscode.window.showWarningMessage(
-      `Delete branch ${branch}?`,
+      `Delete branch ${displayRefName(branch)}?`,
       { modal: true },
       'Delete'
     );
@@ -310,15 +311,21 @@ export class NativeBranchView implements vscode.Disposable {
   /** Pick a base branch, then show the comparison in the Commits tree. */
   private async compare(git: GitService, target: string): Promise<void> {
     const branches = await git.getBranches();
-    const others = branches.map((b) => b.name).filter((name) => name !== target);
+    const others = branches
+      .filter((b) => b.refName !== target)
+      .map((b) => ({
+        label: b.name,
+        description: b.kind,
+        refName: b.refName,
+      }));
     const base = await vscode.window.showQuickPick(others, {
-      placeHolder: `Compare ${target} with… (pick the base branch)`,
+      placeHolder: `Compare ${displayRefName(target)} with… (pick the base branch)`,
     });
     if (!base) {
       return;
     }
-    const result = await git.compare(base, target);
-    this.showCompare(base, target, result);
+    const result = await git.compare(base.refName, target);
+    this.showCompare(base.refName, target, result);
   }
 
   /**
@@ -329,7 +336,7 @@ export class NativeBranchView implements vscode.Disposable {
    */
   private showCompare(base: string, target: string, result: CompareResult): void {
     this.commitsProvider.setCompare(base, target, result);
-    this.commitsView.description = `${base} ⇄ ${target}`;
+    this.commitsView.description = `${displayRefName(base)} ⇄ ${displayRefName(target)}`;
   }
 
   private async openCommitFile(node?: CommitTreeNode): Promise<void> {
@@ -337,10 +344,8 @@ export class NativeBranchView implements vscode.Disposable {
       return;
     }
     const root = this.repoRoot;
-    // Renames arrive as "old → new"; diff the old path on the left, new on right.
-    const [oldPath, newPath] = node.path.includes(' → ')
-      ? node.path.split(' → ')
-      : [node.path, node.path];
+    const oldPath = node.oldPath ?? node.path;
+    const newPath = node.path;
     await vscode.commands.executeCommand(
       'vscode.diff',
       fileAtRefUri(root, node.parentHash, oldPath),
@@ -405,7 +410,7 @@ export class NativeBranchView implements vscode.Disposable {
     }
   }
 
-  private async filesFor(hash: string): Promise<{ status: string; path: string }[]> {
+  private async filesFor(hash: string): Promise<{ status: string; path: string; oldPath?: string }[]> {
     const git = await this.resolveGit();
     if (!git) {
       return [];

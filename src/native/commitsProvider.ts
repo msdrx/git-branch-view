@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { CommitInfo, CompareResult } from '../git/gitService';
+import { displayRefName } from '../refName';
 
 /** git's well-known empty-tree hash — the "parent" used to diff a root commit. */
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -18,6 +19,7 @@ export type CommitTreeNode =
       parentHash: string;
       status: string;
       path: string;
+      oldPath?: string;
     }
   | { kind: 'section'; label: string; children: CommitTreeNode[] }
   /** Trailing "Load more commits…" row, shown while more history exists
@@ -50,7 +52,7 @@ export class CommitsProvider implements vscode.TreeDataProvider<CommitTreeNode> 
   private loadingMore = false;
 
   constructor(
-    private readonly getFiles: (hash: string) => Promise<{ status: string; path: string }[]>
+    private readonly getFiles: (hash: string) => Promise<{ status: string; path: string; oldPath?: string }[]>
   ) {}
 
   setCommits(commits: CommitInfo[], hasMore = false): void {
@@ -115,9 +117,15 @@ export class CommitsProvider implements vscode.TreeDataProvider<CommitTreeNode> 
       return item;
     }
 
-    const item = new vscode.TreeItem(node.path, vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(
+      node.oldPath ? `${node.oldPath} -> ${node.path}` : node.path,
+      vscode.TreeItemCollapsibleState.None
+    );
     item.description = node.status;
     item.resourceUri = vscode.Uri.file(node.path);
+    if (node.oldPath) {
+      item.tooltip = `${node.oldPath} -> ${node.path}`;
+    }
     item.iconPath = vscode.ThemeIcon.File;
     item.contextValue = 'gbv.file';
     item.command = {
@@ -151,6 +159,7 @@ export class CommitsProvider implements vscode.TreeDataProvider<CommitTreeNode> 
         parentHash,
         status: f.status,
         path: f.path,
+        oldPath: f.oldPath,
       }));
     }
     return [];
@@ -164,6 +173,8 @@ export class CommitsProvider implements vscode.TreeDataProvider<CommitTreeNode> 
   private compareSections({ base, target, result }: CompareView): CommitTreeNode[] {
     const commitNodes = (commits: CommitInfo[]): CommitTreeNode[] =>
       commits.map((info) => ({ kind: 'commit', info }));
+    const baseLabel = displayRefName(base);
+    const targetLabel = displayRefName(target);
     return [
       {
         kind: 'section',
@@ -174,16 +185,17 @@ export class CommitsProvider implements vscode.TreeDataProvider<CommitTreeNode> 
           parentHash: result.mergeBase,
           status: f.status,
           path: f.path,
+          oldPath: f.oldPath,
         })),
       },
       {
         kind: 'section',
-        label: `In ${target}, not in ${base} (${result.ahead.length})`,
+        label: `In ${targetLabel}, not in ${baseLabel} (${result.ahead.length})`,
         children: commitNodes(result.ahead),
       },
       {
         kind: 'section',
-        label: `In ${base}, not in ${target} (${result.behind.length})`,
+        label: `In ${baseLabel}, not in ${targetLabel} (${result.behind.length})`,
         children: commitNodes(result.behind),
       },
     ];

@@ -18,15 +18,20 @@ beforeEach(() => {
   postMock.mockClear();
 });
 
-const branch = (over: Partial<Branch>): Branch => ({
-  refName: 'refs/heads/main',
-  name: 'main',
-  commit: 'abc',
-  kind: 'local',
-  isHead: false,
-  refShort: `${over.kind ?? 'local'}:${over.name ?? 'main'}`,
-  ...over,
-});
+const branch = (over: Partial<Branch>): Branch => {
+  const name = over.name ?? 'main';
+  const kind = over.kind ?? 'local';
+  const refName = over.refName ?? (kind === 'remote' ? `refs/remotes/${name}` : `refs/heads/${name}`);
+  return {
+    refName,
+    name,
+    commit: 'abc',
+    kind,
+    isHead: false,
+    refShort: refName,
+    ...over,
+  };
+};
 
 const commit = (hash: string, subject: string, refs: string[] = []): Commit => ({
   hash,
@@ -63,8 +68,9 @@ describe('Toolbar', () => {
   });
 
   it('labels the Compare button with the armed base', () => {
-    renderToolbar('main');
+    renderToolbar('refs/heads/main');
     expect(screen.getByText(/Comparing: main/)).toBeTruthy();
+    expect(screen.queryByText(/refs\/heads\/main/)).toBeNull();
   });
 
   it('sends a resetting ready message from Refresh', () => {
@@ -85,7 +91,7 @@ describe('BranchPane', () => {
     render(
       <BranchPane
         branches={branches}
-        selectedRef="local:main"
+        selectedRef="refs/heads/main"
         collapsed={{}}
         changes={null}
         selectedFile={null}
@@ -227,7 +233,7 @@ describe('BranchPane', () => {
       renderPane({
         changes: {
           ...detail,
-          files: [{ status: 'R100', path: 'src/old.js → src/new.js' }],
+          files: [{ status: 'R100', oldPath: 'src/old.js', path: 'src/new.js' }],
         },
       });
       expect(
@@ -240,7 +246,7 @@ describe('BranchPane', () => {
 describe('changed-files tree model (buildFileTree / displayPath)', () => {
   it('displayPath returns the path itself, or the new side of a rename', () => {
     expect(displayPath('src/a.ts')).toBe('src/a.ts');
-    expect(displayPath('src/old.ts → src/new.ts')).toBe('src/new.ts');
+    expect(displayPath({ oldPath: 'src/old.ts', path: 'src/new.ts' })).toBe('src/new.ts');
   });
 
   it('nests files under their directories and keeps root-level files at the root', () => {
@@ -265,9 +271,12 @@ describe('changed-files tree model (buildFileTree / displayPath)', () => {
   });
 
   it('files a rename under its new directory, even across folders', () => {
-    const tree = buildFileTree([{ status: 'R100', path: 'old/place.ts → new/spot.ts' }]);
+    const tree = buildFileTree([{ status: 'R100', oldPath: 'old/place.ts', path: 'new/spot.ts' }]);
     expect(tree.dirs.has('old')).toBe(false);
-    expect(tree.dirs.get('new')!.files[0].path).toBe('old/place.ts → new/spot.ts');
+    expect(tree.dirs.get('new')!.files[0]).toMatchObject({
+      oldPath: 'old/place.ts',
+      path: 'new/spot.ts',
+    });
   });
 
   it('treats unicode and spaced segments as ordinary path parts', () => {
@@ -404,7 +413,7 @@ describe('ContextMenu', () => {
     const onClose = vi.fn();
     open({ x: 0, y: 0, target: { type: 'branch', branch: branch({ name: 'dev' }) } }, { onClose });
     fireEvent.click(screen.getByText('Checkout dev'));
-    expect(postMock).toHaveBeenCalledWith({ type: 'checkout', branch: 'dev' });
+    expect(postMock).toHaveBeenCalledWith({ type: 'checkout', branch: 'refs/heads/dev' });
     expect(onClose).toHaveBeenCalled();
   });
 

@@ -8,6 +8,7 @@ import { BranchPane, type ChangesView } from './components/BranchPane';
 import { RightHeader } from './components/RightHeader';
 import { CommitList } from './components/CommitList';
 import { ContextMenu } from './components/ContextMenu';
+import { displayRefName } from './format';
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -79,12 +80,16 @@ export function App() {
   const onSelectBranch = useCallback((b: Branch) => {
     // While compare mode is armed, clicking another branch runs the compare.
     const base = compareBaseRef.current;
-    if (base && b.name !== base) {
-      post({ type: 'compare', base, target: b.name });
+    if (base && b.refName !== base) {
+      dispatch({ type: 'ui/requestCompare', base, target: b.refName });
+      post({ type: 'compare', base, target: b.refName });
+      return;
+    } else if (base) {
+      dispatch({ type: 'ui/setCompareBase', base: null });
       return;
     }
     dispatch({ type: 'ui/selectBranch', branch: b });
-    post({ type: 'selectBranch', ref: b.name });
+    post({ type: 'selectBranch', ref: b.refName });
   }, []);
 
   // Selecting a commit asks the host for its detail; the response fills the
@@ -158,6 +163,7 @@ export function App() {
         hash: detail.commit.hash,
         parent: detail.commit.parents[0] ?? null,
         path: f.path,
+        ...(f.oldPath ? { oldPath: f.oldPath } : {}),
       });
     } else if (compare) {
       post({
@@ -165,6 +171,7 @@ export function App() {
         hash: compare.target,
         parent: compare.result.mergeBase,
         path: f.path,
+        ...(f.oldPath ? { oldPath: f.oldPath } : {}),
       });
     }
   }, []);
@@ -183,9 +190,10 @@ export function App() {
       base: compareBaseRef.current ? null : selectedOrCurrentRef.current,
     });
   }, []);
-  // selectedName ?? current, kept in a ref for the stable toolbar callback.
+  // selected ref ?? current branch, kept in a ref for the stable toolbar callback.
   const selectedOrCurrentRef = useRef('');
-  selectedOrCurrentRef.current = state.selectedName || state.current;
+  selectedOrCurrentRef.current =
+    state.selectedRef || state.branches.find((b) => b.isHead && b.name === state.current)?.refName || state.current;
 
   const onColumnWidths = useCallback((widths: ColumnWidths) => {
     dispatch({ type: 'ui/setColumnWidths', widths });
@@ -239,8 +247,10 @@ export function App() {
       }
     : state.compare
       ? {
-          label: `${state.compare.base} ⇄ ${state.compare.target}`,
-          tooltip: `Compare ${state.compare.base} ⇄ ${state.compare.target}`,
+          label: `${displayRefName(state.compare.base)} ⇄ ${displayRefName(state.compare.target)}`,
+          tooltip: `Compare ${displayRefName(state.compare.base)} ⇄ ${displayRefName(
+            state.compare.target
+          )}`,
           files: state.compare.result.files,
         }
       : null;

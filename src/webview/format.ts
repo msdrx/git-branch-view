@@ -1,4 +1,5 @@
 /** Small display formatters shared across components. Pure, unit-tested. */
+export { displayRefName } from '../refName';
 
 /** Up to two initials for the author avatar chip, e.g. "Ada Lovelace" → "AL". */
 export function initials(name: string | null | undefined): string {
