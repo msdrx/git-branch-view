@@ -117,8 +117,12 @@ export type WebviewMessage =
   | { type: 'ready'; reset?: boolean; pageSize?: number }
   | { type: 'refresh' }
   | { type: 'selectBranch'; ref: string }
-  /** Ask for the next page of the focused history, starting at `skip`. */
-  | { type: 'moreCommits'; skip: number }
+  /**
+   * Ask for the next page of the focused history, starting at `skip`. `ref`
+   * is the history scope currently shown, so the host fetches the same history
+   * even if the user switches branches before this message is handled.
+   */
+  | { type: 'moreCommits'; ref: string | null; skip: number }
   | { type: 'commitDetail'; hash: string }
   | { type: 'openFileDiff'; hash: string; parent: string | null; path: string; oldPath?: string }
   | { type: 'compare'; base: string; target: string }

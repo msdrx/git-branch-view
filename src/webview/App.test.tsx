@@ -178,7 +178,7 @@ describe('App: scroll paging of the commit list', () => {
     postMock.mockClear();
 
     scrollNearBottom(document.querySelector('#graphWrap')!);
-    expect(postMock).toHaveBeenCalledWith({ type: 'moreCommits', skip: 1 });
+    expect(postMock).toHaveBeenCalledWith({ type: 'moreCommits', ref: 'main', skip: 1 });
     expect(screen.getByText('Loading more commits…')).toBeTruthy();
 
     // A second scroll while the page is in flight must not re-request.

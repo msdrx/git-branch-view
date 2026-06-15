@@ -50,6 +50,12 @@ export class BranchViewPanel {
    * position) survives; selecting a branch resets it to one page.
    */
   private loadedCount = 0;
+  /**
+   * Incremented whenever the panel adopts or clears a repo. Async git calls
+   * capture this value and drop their result if a later active-editor retarget
+   * moved the panel to another repository before they finished.
+   */
+  private repoGeneration = 0;
 
   static async createOrShow(
     context: vscode.ExtensionContext,
@@ -128,8 +134,7 @@ export class BranchViewPanel {
     // that's gone, or a better candidate may have appeared.
     vscode.workspace.onDidChangeWorkspaceFolders(
       () => {
-        this.git = undefined;
-        this.repoRoot = undefined;
+        this.clearRepo();
         void this.loadAll();
       },
       null,
@@ -181,9 +186,7 @@ export class BranchViewPanel {
     // the native UI so both resolve the same repo).
     const root = await resolveRepoRoot(this.logger);
     if (root) {
-      this.git = new GitService(root, this.logger);
-      this.repoRoot = root;
-      this.post({ type: 'repo', root });
+      this.adoptRepo(root);
       return this.git;
     }
     this.post({ type: 'error', message: 'No Git repository found in the workspace.' });
@@ -214,15 +217,30 @@ export class BranchViewPanel {
       return;
     }
     // Adopted a different repo: its diff URIs and history replace the old one.
-    this.git = new GitService(root, this.logger);
-    this.repoRoot = root;
-    this.post({ type: 'repo', root });
+    this.adoptRepo(root);
     // The persisted focus belongs to the previous repo; follow the new repo's
     // HEAD and reset the loaded depth.
     this.setFocus(undefined);
     this.lastCurrent = undefined;
     this.loadedCount = 0;
     await this.loadAll();
+  }
+
+  private adoptRepo(root: string): void {
+    this.git = new GitService(root, this.logger);
+    this.repoRoot = root;
+    this.repoGeneration++;
+    this.post({ type: 'repo', root });
+  }
+
+  private clearRepo(): void {
+    this.git = undefined;
+    this.repoRoot = undefined;
+    this.repoGeneration++;
+  }
+
+  private isCurrentRepo(git: GitService, generation: number): boolean {
+    return this.git === git && this.repoGeneration === generation;
   }
 
   /**
@@ -245,12 +263,16 @@ export class BranchViewPanel {
     if (!git) {
       return;
     }
+    const generation = this.repoGeneration;
     try {
       // Re-fetch at least what the webview already shows, so a refresh after
       // deep scrolling doesn't visibly shrink the list.
       const limit = Math.max(this.pageSize, this.loadedCount);
 
       const current = await git.getCurrentBranch();
+      if (!this.isCurrentRepo(git, generation)) {
+        return;
+      }
 
       if (this.lastCurrent === undefined) {
         // First load of this panel — adopt HEAD as the baseline without
@@ -275,6 +297,9 @@ export class BranchViewPanel {
         }),
         git.getBranches(),
       ]);
+      if (!this.isCurrentRepo(git, generation)) {
+        return;
+      }
       this.loadedCount = page.commits.length;
 
       // The ref whose history is actually shown (re-read after the catch above,
@@ -297,6 +322,10 @@ export class BranchViewPanel {
           }
         : await git.getTracking();
 
+      if (!this.isCurrentRepo(git, generation)) {
+        return;
+      }
+
       this.post({
         type: 'data',
         branches,
@@ -310,7 +339,9 @@ export class BranchViewPanel {
         columnWidths: this.getColumnWidths(),
       });
     } catch (err) {
-      this.post({ type: 'error', message: String(err) });
+      if (this.isCurrentRepo(git, generation)) {
+        this.post({ type: 'error', message: String(err) });
+      }
     }
   }
 
@@ -319,6 +350,7 @@ export class BranchViewPanel {
     if (!git) {
       return;
     }
+    const generation = this.repoGeneration;
     try {
       switch (msg.type) {
         case 'ready':
@@ -351,6 +383,9 @@ export class BranchViewPanel {
           // Refresh is pressed. A new history starts back at one page.
           this.setFocus(msg.ref);
           const page = await this.getPage(git, [msg.ref], 0, this.pageSize);
+          if (!this.isCurrentRepo(git, generation)) {
+            break;
+          }
           this.loadedCount = page.commits.length;
           this.post({
             type: 'branchCommits',
@@ -363,10 +398,20 @@ export class BranchViewPanel {
 
         case 'moreCommits': {
           // Scroll reached the bottom: append the next page of the focused
-          // history (same scope as loadAll computes).
+          // history the webview requested. The ref travels with the request so
+          // a branch switch before this handler runs cannot change what we
+          // fetch; a stale response is dropped by the reducer.
           const skip = Math.max(0, Math.floor(msg.skip) || 0);
-          const focus = this.focusedRef ?? ((await git.getCurrentBranch()) || undefined);
+          const focus =
+            msg.ref === null
+              ? undefined
+              : typeof msg.ref === 'string'
+                ? msg.ref
+                : this.focusedRef ?? ((await git.getCurrentBranch()) || undefined);
           const page = await this.getPage(git, focus ? [focus] : undefined, skip, this.pageSize);
+          if (!this.isCurrentRepo(git, generation)) {
+            break;
+          }
           this.loadedCount = skip + page.commits.length;
           this.post({
             type: 'moreCommits',
@@ -383,6 +428,9 @@ export class BranchViewPanel {
 
         case 'commitDetail': {
           const detail = await git.getCommitDetail(msg.hash);
+          if (!this.isCurrentRepo(git, generation)) {
+            break;
+          }
           this.post({ type: 'commitDetail', detail });
           break;
         }
@@ -441,6 +489,9 @@ export class BranchViewPanel {
 
         case 'compare': {
           const result = await git.compare(msg.base, msg.target);
+          if (!this.isCurrentRepo(git, generation)) {
+            break;
+          }
           this.post({ type: 'compareResult', base: msg.base, target: msg.target, result });
           break;
         }
@@ -543,7 +594,9 @@ export class BranchViewPanel {
           break;
       }
     } catch (err) {
-      this.post({ type: 'error', message: String(err) });
+      if (this.isCurrentRepo(git, generation)) {
+        this.post({ type: 'error', message: String(err) });
+      }
     }
   }
 

@@ -215,17 +215,25 @@ export function App() {
   }, []);
 
   // Latest paging state for the stable scroll handler.
-  const pagingRef = useRef({ hasMore: state.hasMore, loadingMore: state.loadingMore });
-  pagingRef.current = { hasMore: state.hasMore, loadingMore: state.loadingMore };
+  const pagingRef = useRef({
+    hasMore: state.hasMore,
+    loadingMore: state.loadingMore,
+    historyRef: state.historyRef,
+  });
+  pagingRef.current = {
+    hasMore: state.hasMore,
+    loadingMore: state.loadingMore,
+    historyRef: state.historyRef,
+  };
 
   // Scroll approached the bottom of the commit list: page in more history.
   const onLoadMore = useCallback(() => {
-    const { hasMore, loadingMore } = pagingRef.current;
+    const { hasMore, loadingMore, historyRef } = pagingRef.current;
     if (!hasMore || loadingMore) {
       return;
     }
     dispatch({ type: 'ui/loadingMore' });
-    post({ type: 'moreCommits', skip: commitsRef.current.length });
+    post({ type: 'moreCommits', ref: historyRef, skip: commitsRef.current.length });
   }, []);
 
   // Left/right split drag.
