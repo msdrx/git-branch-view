@@ -20,9 +20,9 @@
 # creates a git commit + tag (it requires a clean working tree — commit your
 # changes first). Omit it to package whatever version package.json already has.
 #
-# What ships is controlled by .vscodeignore (only out/, media/, package.json,
-# README). vsce runs `vscode:prepublish` (→ npm run compile) automatically, so
-# the bundled out/ is always freshly compiled.
+# What ships is controlled by .vscodeignore and the allowlist verification near
+# the end of this script. vsce runs `vscode:prepublish` automatically, so the
+# bundled out/ is always freshly compiled with release settings.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -69,6 +69,7 @@ VSIX="${NAME}-${VERSION}.vsix"
 VSCE_VERSION="3.9.2"
 
 echo "Packaging $VSIX (compiles via vscode:prepublish)…"
+rm -rf out media/dist
 # vsce rewrites the README's relative image link against the `repository` URL
 # in package.json (→ https://github.com/<owner>/<repo>/raw/HEAD/media/…).
 # That absolute HTTPS URL is the ONLY kind VS Code's extension-details page
@@ -79,6 +80,52 @@ echo "Packaging $VSIX (compiles via vscode:prepublish)…"
 # on GitHub and in markdown previews of the source README.
 npx --yes "@vscode/vsce@${VSCE_VERSION}" package \
   --out "$VSIX"
+
+echo "Verifying VSIX contents…"
+BAD_FILES=()
+while IFS= read -r FILE; do
+  case "$FILE" in
+    "extension.vsixmanifest" | \
+    "[Content_Types].xml" | \
+    "extension/package.json" | \
+    "extension/LICENSE.txt" | \
+    "extension/readme.md" | \
+    "extension/media/icon.svg" | \
+    "extension/media/screenshot.png" | \
+    "extension/media/dist/webview.css" | \
+    "extension/media/dist/webview.js" | \
+    extension/out/*.js | \
+    extension/out/*/*.js)
+      ;;
+    *)
+      BAD_FILES+=("$FILE")
+      ;;
+  esac
+done < <(unzip -Z1 "$VSIX")
+
+if [ "${#BAD_FILES[@]}" -ne 0 ]; then
+  echo "error: VSIX contains files outside the release allowlist:" >&2
+  printf '  %s\n' "${BAD_FILES[@]}" >&2
+  exit 1
+fi
+
+MARKER_FOUND=0
+while IFS= read -r FILE; do
+  case "$FILE" in
+    extension/media/dist/webview.js | extension/out/*.js | extension/out/*/*.js)
+      if unzip -p "$VSIX" "$FILE" | grep -Eq 'sourceMappingURL|debugger;|eval\('; then
+        MARKER_FOUND=1
+      fi
+      ;;
+  esac
+done < <(unzip -Z1 "$VSIX")
+
+if [ "$MARKER_FOUND" -ne 0 ]; then
+  echo "error: VSIX JavaScript contains sourcemap, debugger, or eval markers" >&2
+  exit 1
+fi
+
+echo "VSIX contents verified: runtime JavaScript, bundled webview assets, media, README, and manifest only."
 
 echo
 echo "Done → $ROOT/$VSIX"

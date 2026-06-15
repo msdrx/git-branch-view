@@ -9,6 +9,7 @@ const esbuild = require('esbuild');
 const path = require('path');
 
 const watch = process.argv.includes('--watch');
+const nodeEnv = process.env.NODE_ENV || (watch ? 'development' : 'production');
 
 const options = {
   entryPoints: [path.join(__dirname, '..', 'src', 'webview', 'index.tsx')],
@@ -18,6 +19,9 @@ const options = {
   platform: 'browser',
   target: 'es2021',
   jsx: 'automatic',
+  define: {
+    'process.env.NODE_ENV': JSON.stringify(nodeEnv),
+  },
   sourcemap: watch ? 'inline' : false,
   minify: !watch,
   logLevel: 'info',

@@ -3,6 +3,7 @@
 src/**
 out/**/*.map
 tsconfig.json
+tsconfig*.json
 **/*.ts
 .gitignore
 node_modules/**

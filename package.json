@@ -384,8 +384,9 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run compile:release",
     "compile": "tsc -p ./ && npm run typecheck:webview && node scripts/build-webview.js",
+    "compile:release": "tsc -p ./tsconfig.release.json && npm run typecheck:webview && NODE_ENV=production node scripts/build-webview.js",
     "watch": "node scripts/build-webview.js --watch & tsc -watch -p ./",
     "typecheck:webview": "tsc -p src/webview/tsconfig.json",
     "lint": "eslint src --ext ts",
