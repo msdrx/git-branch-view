@@ -84,6 +84,22 @@ describe('reducer: host messages', () => {
     expect(s.branches).toHaveLength(2);
   });
 
+  it('clears stale commit detail when branchCommits replaces the history', () => {
+    let s = host(initialState, dataMsg());
+    s = reducer(s, { type: 'ui/selectCommit', hash: 'c1' });
+    s = host(s, {
+      type: 'commitDetail',
+      detail: { commit: commit('c1'), body: '', files: [{ status: 'M', path: 'src/a.ts' }] },
+    });
+    s = reducer(s, { type: 'ui/selectFile', path: 'src/a.ts' });
+
+    s = host(s, { type: 'branchCommits', ref: 'dev', commits: [commit('x')] });
+
+    expect(s.selectedHash).toBeNull();
+    expect(s.commitFiles).toBeNull();
+    expect(s.selectedFile).toBeNull();
+  });
+
   it('tracks hasMore from data and branchCommits payloads', () => {
     let s = host(initialState, dataMsg({ hasMore: true }));
     expect(s.hasMore).toBe(true);

@@ -193,6 +193,9 @@ function handleHostMessage(state: AppState, msg: HostMessage): AppState {
         commits: msg.commits,
         hasMore: msg.hasMore ?? false,
         loadingMore: false,
+        selectedHash: null,
+        commitFiles: null,
+        selectedFile: null,
         error: null,
       };
     case 'moreCommits':

@@ -193,6 +193,19 @@ describe('real git: commit change information', () => {
       expect(hashes).not.toContain(mergeHash);
     });
 
+    it('loads branch history even if the focused ref was persisted shell-quoted', async () => {
+      const repo = makeRepo();
+      repo.write('a.txt', 'base\n');
+      repo.commit('base');
+      repo.run('checkout', '-q', '-b', 'features/net10');
+      repo.write('feature.txt', 'net10\n');
+      const featureCommit = repo.commit('net10 work');
+
+      const commits = await repo.service.getCommits(100, [`'features/net10'`]);
+      expect(commits.map((c) => c.hash)).toContain(featureCommit);
+      expect(commits[0].subject).toBe('net10 work');
+    });
+
     it('pages with skip: consecutive pages stitch back into the full list', async () => {
       const all = await repo.service.getCommits(100, ['main']);
       const page1 = await repo.service.getCommits(2, ['main']);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   GitService,
   assertNotOption,
+  normalizeRefArgument,
   parseRefs,
   parseTrack,
   quote,
@@ -63,6 +64,18 @@ describe('quote', () => {
   });
 });
 
+describe('normalizeRefArgument', () => {
+  it('unwraps a whole shell-quoted ref before GitService quotes it', () => {
+    expect(normalizeRefArgument(`'features/net10'`)).toBe('features/net10');
+    expect(normalizeRefArgument(`'wip/ada'\\''s-fix'`)).toBe("wip/ada's-fix");
+  });
+
+  it('leaves non-wrapper quote characters untouched', () => {
+    expect(normalizeRefArgument("wip/ada's-fix")).toBe("wip/ada's-fix");
+    expect(normalizeRefArgument("feature/'draft")).toBe("feature/'draft");
+  });
+});
+
 describe('GitService.getBranches', () => {
   it('parses local and remote branches with tracking info', async () => {
     const line = (f: string[]) => f.join(NUL);
@@ -118,6 +131,13 @@ describe('GitService.getCommits', () => {
     const { git, commands } = fakeGit({ 'git log': '' });
     await git.getCommits(10, ['feature/x']);
     expect(commands[0]).toContain(`'feature/x'`);
+  });
+
+  it('does not pass stale shell quotes through to git when scoping branch history', async () => {
+    const { git, commands } = fakeGit({ 'git log': '' });
+    await git.getCommits(10, [`'features/net10'`]);
+    expect(commands[0]).toContain(`--end-of-options 'features/net10'`);
+    expect(commands[0]).not.toContain(`''features/net10''`);
   });
 
   it('passes --skip when paging, and omits it for the first page', async () => {

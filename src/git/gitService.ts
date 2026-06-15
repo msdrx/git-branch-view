@@ -292,6 +292,7 @@ export class GitService {
    * (`--skip`), so the webview can fetch history incrementally on scroll.
    */
   async getCommits(limit: number, refs?: string[], skip = 0): Promise<CommitInfo[]> {
+    const normalizedRefs = refs?.map(normalizeRefArgument);
     const fmt = [
       '%H', // full hash
       '%P', // parent hashes
@@ -317,8 +318,8 @@ export class GitService {
       `--author-date-order --max-count=${Math.floor(limit)}${skipArg}` +
       ` --format="${fmt}${FMT_REC_LOG}"`;
     const scope =
-      refs && refs.length
-        ? `${await this.refBarrier(...refs)}${refs.map(quote).join(' ')}`
+      normalizedRefs && normalizedRefs.length
+        ? `${await this.refBarrier(...normalizedRefs)}${normalizedRefs.map(quote).join(' ')}`
         : '--branches --remotes';
     const out = await this.git(`log ${opts} ${scope}`);
 
@@ -570,6 +571,20 @@ export function parseRefs(refsStr: string): string[] {
 /** Quote a git argument so branch names with odd characters survive the shell. */
 export function quote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Older persisted focus values, or extension/webview boundary values from a
+ * previous build, may already be shell-quoted. If passed through `quote` again,
+ * git receives literal quote bytes and errors with "ambiguous argument
+ * ''main''". Only unwrap a complete POSIX single-quoted shell word; every other
+ * ref is left byte-for-byte intact.
+ */
+export function normalizeRefArgument(ref: string): string {
+  if (!/^'(?:[^']|'\\'')*'$/.test(ref)) {
+    return ref;
+  }
+  return ref.slice(1, -1).replace(/'\\''/g, "'");
 }
 
 /**
