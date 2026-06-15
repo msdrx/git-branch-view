@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import type { Commit, ColumnKey, ColumnWidths } from '../types';
+import type { Commit, ColumnKey, ColumnWidths, DateFormat } from '../types';
 import type { CompareState } from '../state';
 import { computeGraph, edgePath, laneX, rowY, LANE_W, PAD, ROW_H } from '../graph';
 import { COLUMN_DEFS, MIN_COL_W, applyColumnTemplate } from '../columns';
@@ -10,6 +10,8 @@ interface CommitListProps {
   current: string;
   selectedHash: string | null;
   columnWidths: ColumnWidths;
+  /** How commit dates render in the Date column. */
+  dateFormat: DateFormat;
   /** When set, the list shows the comparison's ahead/behind commits instead. */
   compare: CompareState | null;
   error: string | null;
@@ -198,7 +200,15 @@ interface CommitRowProps extends CommitListProps {
   marker?: string;
 }
 
-function CommitRow({ commit: c, current, selectedHash, marker, onSelectCommit, onCommitMenu }: CommitRowProps) {
+function CommitRow({
+  commit: c,
+  current,
+  selectedHash,
+  marker,
+  dateFormat,
+  onSelectCommit,
+  onCommitMenu,
+}: CommitRowProps) {
   const selected = selectedHash === c.hash;
 
   // Keep the row visible when selection moves via the arrow keys.
@@ -233,7 +243,7 @@ function CommitRow({ commit: c, current, selectedHash, marker, onSelectCommit, o
         <span className="avatar">{initials(c.authorName)}</span>
         {c.authorName}
       </div>
-      <div className="cell mono">{formatDate(c.authorDate)}</div>
+      <div className="cell mono">{formatDate(c.authorDate, dateFormat)}</div>
       <div className="cell mono">{c.shortHash}</div>
     </div>
   );

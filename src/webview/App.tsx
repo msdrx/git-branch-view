@@ -53,6 +53,20 @@ export function App() {
     return () => window.removeEventListener('focus', requestRefresh);
   }, []);
 
+  // Relative date labels ("just now", "5 minutes ago") are derived from
+  // Date.now() at render time, so without a periodic nudge they freeze at the
+  // value computed when the data last arrived. While that format is active,
+  // tick once a minute to re-render and refresh them. Absolute formats never go
+  // stale, so they get no timer.
+  const [, tickClock] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (state.dateFormat !== 'relative') {
+      return;
+    }
+    const id = window.setInterval(tickClock, 60_000);
+    return () => window.clearInterval(id);
+  }, [state.dateFormat]);
+
   // Close the context menu on any click or scroll, the compare+menu on Escape.
   useEffect(() => {
     const closeMenu = () => dispatch({ type: 'ui/closeMenu' });
@@ -232,6 +246,20 @@ export function App() {
     window.addEventListener('mouseup', onUp);
   }, []);
 
+  // Whether the viewed ref is the checked-out branch — gates the HEAD-only
+  // Pull/Push/Sync actions. Match on the *full* ref of the head branch, not the
+  // short name: a local branch and a remote branch can share a short name (e.g.
+  // a local `origin/main` vs `refs/remotes/origin/main`), and a short-name match
+  // would wrongly enable those actions while a different ref is on screen. With
+  // no branch node selected (selectedRef null) the header shows the current
+  // branch, so fall back to the name check there.
+  const headRef = state.branches.find((b) => b.isHead)?.refShort ?? null;
+  const isViewingCurrentBranch =
+    !state.compare &&
+    (state.selectedRef !== null
+      ? state.selectedRef === headRef
+      : !state.selectedName || state.selectedName === state.current);
+
   // What the left Changes pane shows: a clicked commit's files take
   // precedence; underneath them sit the active comparison's files.
   const changes: ChangesView | null = state.commitFiles
@@ -285,12 +313,14 @@ export function App() {
             branchName={state.selectedName || state.current}
             tracking={state.tracking}
             compare={state.compare}
+            isCurrentBranch={isViewingCurrentBranch}
           />
           <CommitList
             commits={state.commits}
             current={state.current}
             selectedHash={state.selectedHash}
             columnWidths={state.columnWidths}
+            dateFormat={state.dateFormat}
             compare={state.compare}
             error={state.error}
             hasMore={state.hasMore}

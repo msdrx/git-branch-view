@@ -303,6 +303,13 @@ body {
   text-decoration: underline;
 }
 
+/* A branch-scoped action (Pull/Push/Sync) disabled while viewing a branch
+   other than the checked-out one — pull/push only ever act on HEAD. */
+.section .disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ---------- Graph + columns ---------- */
 #graphWrap {
   flex: 1;

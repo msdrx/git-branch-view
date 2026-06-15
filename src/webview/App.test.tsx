@@ -188,6 +188,7 @@ describe('App: scroll paging of the commit list', () => {
 
     hostSends({
       type: 'moreCommits',
+      ref: 'main',
       skip: 1,
       commits: [commit('24be8a91ff00aa11bb22', 'Older work')],
       hasMore: false,
@@ -485,5 +486,78 @@ describe('App: branch compare → changed files → diff editor beside', () => {
     expect(document.querySelector('.compare-section')).toBeNull();
     expect(document.querySelector('#changes')).toBeNull();
     expect(screen.getByText('Refactor engine core')).toBeTruthy();
+  });
+});
+
+describe('App: Pull/Push enablement matches the exact checked-out ref', () => {
+  // A local branch literally named "origin/main" is checked out, and a remote
+  // refs/remotes/origin/main shares its short name. The HEAD-only Pull/Push/Sync
+  // must stay tied to the *local* ref: viewing the remote one (which can't be
+  // pulled/pushed as HEAD) must not enable them just because the short names
+  // collide.
+  const collidingData: HostMessage = {
+    type: 'data',
+    branches: [
+      { refName: 'refs/heads/origin/main', name: 'origin/main', commit: 'aaaa', kind: 'local', isHead: true },
+      { refName: 'refs/remotes/origin/main', name: 'origin/main', commit: 'aaaa', kind: 'remote', isHead: false },
+    ],
+    commits: [commit('aaaa000000000000000000', 'Tip')],
+    tracking: { ahead: 0, behind: 0 },
+    current: 'origin/main',
+    focused: 'origin/main',
+  };
+
+  // The header's Pull link (an <a> when enabled, a disabled <span> otherwise),
+  // scoped to #rightHeader so the Toolbar's own Pull button doesn't collide.
+  const headerPull = () => {
+    const header = document.querySelector('#rightHeader')!;
+    return [...header.querySelectorAll('a, span')].find((n) => n.textContent === 'Pull')!;
+  };
+
+  it('enables Pull while the checked-out branch is the one shown', () => {
+    render(<App />);
+    hostSends(collidingData);
+    expect(headerPull().tagName).toBe('A');
+  });
+
+  it('disables Pull when a remote ref of the same short name is selected', () => {
+    render(<App />);
+    hostSends(collidingData);
+    // The remote branch renders as "main" under remotes/origin (prefix dropped).
+    fireEvent.click(screen.getByText('main'));
+    const pull = headerPull();
+    expect(pull.tagName).toBe('SPAN');
+    expect(pull.classList.contains('disabled')).toBe(true);
+  });
+});
+
+describe('App: relative dates refresh on a timer', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-15T12:00:00Z'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // The first .cell.mono in a row is the Date column.
+  const dateText = () => document.querySelector('#rows .commit-row .cell.mono')?.textContent;
+
+  it('re-renders relative labels as the clock advances, without new host data', () => {
+    render(<App />);
+    const recent = new Date(Date.now()).toISOString();
+    hostSends({
+      ...dataMsg,
+      dateFormat: 'relative',
+      commits: [{ ...commit('aaaa000000000000000000', 'Recent'), authorDate: recent }],
+    } as HostMessage);
+    expect(dateText()).toBe('just now');
+
+    // A minute later the timer fires and the label refreshes — even though the
+    // host sent nothing new.
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(dateText()).toBe('1 minute ago');
   });
 });

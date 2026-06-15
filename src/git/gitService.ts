@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as path from 'path';
 
 const execAsync = promisify(exec);
 
@@ -227,6 +228,48 @@ export class GitService {
       return stdout.trim() || undefined;
     } catch (err) {
       logger?.error(`> git ${args} (in ${folder}) [${Date.now() - start}ms]\n${String(err)}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Resolve the real git directory and the common git directory for a folder.
+   * For a normal repo both are `<repo>/.git`. For a LINKED WORKTREE the git dir
+   * is `<main>/.git/worktrees/<name>` while the common dir is `<main>/.git`, and
+   * the worktree's own `.git` is a *file* — so a `**\/.git/...` workspace glob
+   * never sees its HEAD or the shared refs change. Watching these absolute
+   * paths is how the extension picks up commits/checkouts in a worktree.
+   *
+   * Returns absolute paths, or `undefined` when the folder isn't a git repo (or
+   * git isn't available). Static because the watcher setup runs per workspace
+   * folder before any GitService instance exists.
+   */
+  static async getGitDirs(
+    folder: string,
+    logger?: Logger
+  ): Promise<{ gitDir: string; commonDir: string } | undefined> {
+    const env = { ...process.env, LC_ALL: 'C' };
+    try {
+      // --absolute-git-dir forces an absolute path for the git dir (git 2.13+).
+      const { stdout } = await execAsync('git rev-parse --absolute-git-dir', { cwd: folder, env });
+      const gitDir = stdout.trim();
+      if (!gitDir) {
+        return undefined;
+      }
+      let commonDir = gitDir;
+      try {
+        // --git-common-dir may be relative to the cwd; resolve it ourselves.
+        const out = await execAsync('git rev-parse --git-common-dir', { cwd: folder, env });
+        const c = out.stdout.trim();
+        if (c) {
+          commonDir = path.isAbsolute(c) ? c : path.resolve(folder, c);
+        }
+      } catch {
+        // Older git without --git-common-dir: the git dir is the common dir.
+      }
+      return { gitDir, commonDir };
+    } catch (err) {
+      logger?.error(`> git rev-parse --absolute-git-dir (in ${folder})\n${String(err)}`);
       return undefined;
     }
   }

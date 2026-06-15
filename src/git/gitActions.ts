@@ -12,6 +12,21 @@ import { GitService, PullStrategy } from './gitService';
 
 export const PULL_STRATEGIES: readonly PullStrategy[] = ['merge', 'rebase', 'ff-only'];
 
+/** How commit dates render in the Date column (`gitBranchView.dateFormat`). */
+export type DateFormatPref = 'relative' | 'iso' | 'local';
+
+const DATE_FORMATS: readonly DateFormatPref[] = ['relative', 'iso', 'local'];
+
+/** The persisted date format, falling back to the local format. */
+export function getDateFormat(): DateFormatPref {
+  const value = vscode.workspace
+    .getConfiguration('gitBranchView')
+    .get<string>('dateFormat', 'local');
+  return (DATE_FORMATS as readonly string[]).includes(value)
+    ? (value as DateFormatPref)
+    : 'local';
+}
+
 /** Human labels for the pull strategies, keyed by the stored config value. */
 export const PULL_STRATEGY_LABELS: Record<PullStrategy, string> = {
   merge: 'Merge',

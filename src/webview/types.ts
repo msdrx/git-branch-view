@@ -67,6 +67,9 @@ export interface CompareResult {
 
 export type PullStrategy = 'merge' | 'rebase' | 'ff-only';
 
+/** How commit dates render in the Date column (`gitBranchView.dateFormat`). */
+export type DateFormat = 'relative' | 'iso' | 'local';
+
 /** Human labels for the pull strategies, keyed by the stored config value. */
 export const PULL_STRATEGY_LABELS: Record<PullStrategy, string> = {
   merge: 'Merge',
@@ -89,13 +92,19 @@ export type HostMessage =
       current: string;
       focused: string | null;
       pullStrategy?: PullStrategy;
+      dateFormat?: DateFormat;
       columnWidths?: ColumnWidths;
       /** True when more history exists beyond the commits sent. */
       hasMore?: boolean;
     }
   | { type: 'branchCommits'; ref: string; commits: Commit[]; hasMore?: boolean }
-  /** Next page of the focused ref's history (response to `moreCommits`). */
-  | { type: 'moreCommits'; skip: number; commits: Commit[]; hasMore: boolean }
+  /**
+   * Next page of the focused ref's history (response to `moreCommits`). `ref`
+   * is the history scope the page belongs to (the focused ref, or null when
+   * following `--all`); the webview drops the page if that scope no longer
+   * matches the list it currently holds.
+   */
+  | { type: 'moreCommits'; ref: string | null; skip: number; commits: Commit[]; hasMore: boolean }
   | { type: 'commitDetail'; detail: CommitDetail }
   | { type: 'compareResult'; base: string; target: string; result: CompareResult }
   | { type: 'repo'; root: string }

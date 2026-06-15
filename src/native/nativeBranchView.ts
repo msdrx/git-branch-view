@@ -11,6 +11,7 @@ import {
 import { BranchesProvider, BranchTreeNode } from './branchesProvider';
 import { CommitsProvider, CommitTreeNode } from './commitsProvider';
 import { fileAtRefUri, refLabel } from '../git/gitContentProvider';
+import { activeEditorRepoRoot, resolveRepoRoot } from '../git/resolveRepo';
 import { displayRefName } from '../refName';
 
 /**
@@ -73,6 +74,23 @@ export class NativeBranchView implements vscode.Disposable {
           void this.refresh();
         }
       })
+    );
+
+    // Re-resolve the repository when the workspace folders change: the cached
+    // GitService may now point at a folder that's gone, or a better candidate
+    // may have appeared.
+    this.disposables.push(
+      vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        this.git = undefined;
+        this.repoRoot = undefined;
+        void this.refresh();
+      })
+    );
+
+    // Multi-root: follow the active editor into a different in-workspace repo,
+    // so the active-editor preference isn't only honoured on first resolution.
+    this.disposables.push(
+      vscode.window.onDidChangeActiveTextEditor(() => void this.retargetToActiveEditor())
     );
 
     void this.refresh();
@@ -426,22 +444,51 @@ export class NativeBranchView implements vscode.Disposable {
     if (this.git) {
       return this.git;
     }
-    const folders = vscode.workspace.workspaceFolders;
-    if (!folders || folders.length === 0) {
-      void vscode.commands.executeCommand('setContext', 'gitBranchView.noRepo', true);
-      return undefined;
-    }
-    for (const f of folders) {
-      const root = await GitService.findRepoRoot(f.uri.fsPath, this.logger);
-      if (root) {
-        this.repoRoot = root;
-        this.git = new GitService(root, this.logger);
-        void vscode.commands.executeCommand('setContext', 'gitBranchView.noRepo', false);
-        return this.git;
-      }
+    // Prefers the active editor's repo in multi-root workspaces (shared with
+    // the webview panel so both resolve the same repo).
+    const root = await resolveRepoRoot(this.logger);
+    if (root) {
+      this.repoRoot = root;
+      this.git = new GitService(root, this.logger);
+      void vscode.commands.executeCommand('setContext', 'gitBranchView.noRepo', false);
+      return this.git;
     }
     void vscode.commands.executeCommand('setContext', 'gitBranchView.noRepo', true);
     return undefined;
+  }
+
+  /**
+   * Multi-root only: when the active editor moves to a file owned by a
+   * *different* in-workspace repo, swap the resolved repository to follow it.
+   * Git is asked which repo actually owns the file rather than assuming
+   * path-containment implies the same repo — a nested repository inside the
+   * current repoRoot would otherwise be masked (its files sit under the parent's
+   * path yet belong to the nested repo). Re-resolving to the same repo is a
+   * no-op, and an editor with no file or one outside the workspace is ignored,
+   * so the views never snap away on their own. Mirrors the panel's retargeting.
+   */
+  private async retargetToActiveEditor(): Promise<void> {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length < 2) {
+      return;
+    }
+    const active = vscode.window.activeTextEditor?.document.uri;
+    if (!active || active.scheme !== 'file') {
+      return;
+    }
+    const root = await activeEditorRepoRoot(this.logger);
+    if (!root || root === this.repoRoot) {
+      return;
+    }
+    this.git = new GitService(root, this.logger);
+    this.repoRoot = root;
+    void vscode.commands.executeCommand('setContext', 'gitBranchView.noRepo', false);
+    // The persisted focus belongs to the previous repo; follow the new repo's
+    // HEAD and reset the loaded depth.
+    this.setFocus(undefined);
+    this.lastCurrent = undefined;
+    this.loadedCount = 0;
+    await this.refresh();
   }
 
   private setFocus(ref: string | undefined): void {

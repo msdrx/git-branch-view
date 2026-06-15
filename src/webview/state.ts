@@ -9,6 +9,7 @@ import type {
   Commit,
   CommitDetail,
   CompareResult,
+  DateFormat,
   HostMessage,
   PullStrategy,
   Tracking,
@@ -52,6 +53,13 @@ export interface AppState {
   /** Plain ref name of the selected branch (shown in the right header). */
   selectedName: string | null;
   selectedHash: string | null;
+  /**
+   * Ref scope the currently loaded `commits` belong to (the focused ref, or
+   * null when following `--all`). Mirrors the host's notion of the focused
+   * history so a late `moreCommits` page for a now-abandoned branch is dropped
+   * instead of being appended to the wrong list.
+   */
+  historyRef: string | null;
   /** Commit detail request currently in flight, used to drop stale responses. */
   pendingCommitHash: string | null;
   /** Collapsed tree groups, keyed by group key. */
@@ -61,6 +69,8 @@ export interface AppState {
   /** Compare request currently in flight, used to drop stale host responses. */
   pendingCompare: PendingCompare | null;
   pullStrategy: PullStrategy;
+  /** How commit dates render in the Date column (from the host config). */
+  dateFormat: DateFormat;
   columnWidths: ColumnWidths;
   menu: MenuState | null;
   /** Active branch comparison, or null when showing branch history. */
@@ -84,11 +94,13 @@ export const initialState: AppState = {
   selectedRef: null,
   selectedName: null,
   selectedHash: null,
+  historyRef: null,
   pendingCommitHash: null,
   collapsed: {},
   compareBase: null,
   pendingCompare: null,
   pullStrategy: 'merge',
+  dateFormat: 'local',
   columnWidths: {},
   menu: null,
   compare: null,
@@ -123,10 +135,23 @@ export function reducer(state: AppState, action: Action): AppState {
       // Picking a branch returns to its history view, ending any comparison.
       // Paging pauses (hasMore false) until the new history's first page
       // arrives, so a late scroll can't append the old branch's commits.
+      // The header's incoming/outgoing counts move to the picked branch right
+      // away, from its own tracking data (the same for-each-ref counts the host
+      // sends in `data`), instead of lingering on the previous branch until the
+      // next full refresh.
       return {
         ...state,
         selectedRef: action.branch.refShort,
         selectedName: action.branch.name,
+        // The history scope moves to the picked branch immediately so a late
+        // page for the previous branch is rejected even before its first page
+        // (branchCommits) arrives.
+        historyRef: action.branch.refName,
+        tracking: {
+          ahead: action.branch.ahead ?? 0,
+          behind: action.branch.behind ?? 0,
+          upstream: action.branch.upstream,
+        },
         selectedHash: null,
         pendingCommitHash: null,
         compare: null,
@@ -192,9 +217,13 @@ function handleHostMessage(state: AppState, msg: HostMessage): AppState {
         ...state,
         branches,
         commits: msg.commits,
+        // This payload's commits are the focused history; adopt its scope so
+        // later pages are matched against the right ref.
+        historyRef: msg.focused,
         tracking: msg.tracking,
         current: msg.current,
         pullStrategy: msg.pullStrategy ?? state.pullStrategy,
+        dateFormat: msg.dateFormat ?? state.dateFormat,
         columnWidths: msg.columnWidths ?? state.columnWidths,
         hasMore: msg.hasMore ?? false,
         loadingMore: false,
@@ -218,6 +247,8 @@ function handleHostMessage(state: AppState, msg: HostMessage): AppState {
       return {
         ...state,
         commits: msg.commits,
+        // This branch's first page defines the scope for its later pages.
+        historyRef: msg.ref,
         hasMore: msg.hasMore ?? false,
         loadingMore: false,
         selectedHash: null,
@@ -227,10 +258,12 @@ function handleHostMessage(state: AppState, msg: HostMessage): AppState {
         error: null,
       };
     case 'moreCommits':
-      // Append the next page. A stale page (its skip doesn't line up with the
-      // commits we hold — e.g. the list was replaced while it was in flight)
-      // is dropped instead of corrupting the graph.
-      if (msg.skip !== state.commits.length) {
+      // Append the next page. A stale page is dropped instead of corrupting the
+      // graph — either its `skip` doesn't line up with the commits we hold (the
+      // list was replaced while it was in flight) or its `ref` scope no longer
+      // matches the focused history (the user switched branches, possibly to one
+      // with the same loaded length).
+      if (msg.skip !== state.commits.length || msg.ref !== state.historyRef) {
         return { ...state, loadingMore: false };
       }
       return {

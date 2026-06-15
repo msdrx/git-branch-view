@@ -5,6 +5,7 @@ import { Toolbar } from './Toolbar';
 import { BranchPane, buildFileTree, displayPath, type ChangesView } from './BranchPane';
 import { CommitList } from './CommitList';
 import { ContextMenu } from './ContextMenu';
+import { RightHeader } from './RightHeader';
 import type { Branch, Commit } from '../types';
 import type { MenuState } from '../state';
 
@@ -301,6 +302,7 @@ describe('CommitList', () => {
         current="main"
         selectedHash={null}
         columnWidths={{}}
+        dateFormat="local"
         compare={null}
         error={null}
         hasMore={false}
@@ -347,6 +349,16 @@ describe('CommitList', () => {
     expect(screen.getByText('No commits to display.')).toBeTruthy();
   });
 
+  it('renders dates in the configured format (iso)', () => {
+    renderList({ dateFormat: 'iso' });
+    // The ISO style is a plain YYYY-MM-DD HH:mm — no locale slashes/commas.
+    const dates = [...document.querySelectorAll('.commit-row .cell.mono')]
+      .map((n) => n.textContent || '')
+      .filter((t) => /\d{4}-\d{2}-\d{2}/.test(t));
+    expect(dates.length).toBe(2);
+    expect(dates[0]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  });
+
   describe('compare mode', () => {
     const compare = {
       base: 'main',
@@ -378,6 +390,49 @@ describe('CommitList', () => {
       fireEvent.click(screen.getByText('Add login form'));
       expect(onSelectCommit).toHaveBeenCalledWith(expect.objectContaining({ hash: 'aaaa1111' }));
     });
+  });
+});
+
+describe('RightHeader', () => {
+  const renderHeader = (over: Partial<React.ComponentProps<typeof RightHeader>> = {}) =>
+    render(
+      <RightHeader
+        branchName="main"
+        tracking={{ ahead: 2, behind: 1 }}
+        compare={null}
+        isCurrentBranch={true}
+        {...over}
+      />
+    );
+
+  it('shows the incoming/outgoing counts from tracking', () => {
+    renderHeader();
+    expect(screen.getByText('Incoming (1)')).toBeTruthy();
+    expect(screen.getByText('Local History (2 Outgoing)')).toBeTruthy();
+  });
+
+  it('enables pull/push/sync for the checked-out branch and posts on click', () => {
+    renderHeader();
+    fireEvent.click(screen.getByText('Pull'));
+    fireEvent.click(screen.getByText('Push'));
+    fireEvent.click(screen.getByText('Sync'));
+    const types = postMock.mock.calls.map(([m]) => m.type);
+    // Sync fires pull + push, so the order is pull, push, pull, push.
+    expect(types).toEqual(['pull', 'push', 'pull', 'push']);
+  });
+
+  it('disables pull/push/sync when viewing a non-current branch (but keeps Fetch)', () => {
+    renderHeader({ isCurrentBranch: false });
+    for (const label of ['Pull', 'Push', 'Sync']) {
+      const el = screen.getByText(label);
+      expect(el.tagName).toBe('SPAN');
+      expect(el.classList.contains('disabled')).toBe(true);
+      fireEvent.click(el);
+    }
+    expect(postMock).not.toHaveBeenCalled();
+    // Fetch is repo-global, so it stays clickable.
+    fireEvent.click(screen.getByText('Fetch'));
+    expect(postMock).toHaveBeenCalledWith({ type: 'fetch' });
   });
 });
 

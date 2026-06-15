@@ -74,6 +74,14 @@ describe('reducer: host messages', () => {
     expect(s.columnWidths).toEqual({ date: 200 });
   });
 
+  it('adopts dateFormat from data and keeps it when the payload omits it', () => {
+    expect(initialState.dateFormat).toBe('local');
+    let s = host(initialState, dataMsg({ dateFormat: 'relative' }));
+    expect(s.dateFormat).toBe('relative');
+    s = host(s, dataMsg());
+    expect(s.dateFormat).toBe('relative');
+  });
+
   it('clears a previous error on fresh data', () => {
     let s = host(initialState, { type: 'error', message: 'boom' });
     expect(s.error).toBe('boom');
@@ -118,7 +126,13 @@ describe('reducer: host messages', () => {
     let s = host(initialState, dataMsg({ hasMore: true }));
     s = reducer(s, { type: 'ui/loadingMore' });
     expect(s.loadingMore).toBe(true);
-    s = host(s, { type: 'moreCommits', skip: 1, commits: [commit('x'), commit('y')], hasMore: true });
+    s = host(s, {
+      type: 'moreCommits',
+      ref: 'main',
+      skip: 1,
+      commits: [commit('x'), commit('y')],
+      hasMore: true,
+    });
     expect(s.commits.map((c) => c.hash)).toEqual(['c1', 'x', 'y']);
     expect(s.hasMore).toBe(true);
     expect(s.loadingMore).toBe(false);
@@ -128,8 +142,22 @@ describe('reducer: host messages', () => {
     let s = host(initialState, dataMsg({ hasMore: true }));
     s = reducer(s, { type: 'ui/loadingMore' });
     // The list was replaced (length 1) while a page for skip=50 was in flight.
-    s = host(s, { type: 'moreCommits', skip: 50, commits: [commit('x')], hasMore: true });
+    s = host(s, { type: 'moreCommits', ref: 'main', skip: 50, commits: [commit('x')], hasMore: true });
     expect(s.commits.map((c) => c.hash)).toEqual(['c1']);
+    expect(s.loadingMore).toBe(false);
+  });
+
+  it('drops a moreCommits page whose ref scope no longer matches the history', () => {
+    // Page in 'main', then switch to 'dev' (which happens to have the same
+    // loaded length): a late page for 'main' must NOT splice into 'dev'.
+    let s = host(initialState, dataMsg({ hasMore: true }));
+    s = reducer(s, { type: 'ui/selectBranch', branch: s.branches[1] }); // dev
+    s = host(s, { type: 'branchCommits', ref: 'refs/heads/dev', commits: [commit('d1')], hasMore: true });
+    expect(s.commits.map((c) => c.hash)).toEqual(['d1']);
+    s = reducer(s, { type: 'ui/loadingMore' });
+    // The in-flight page belongs to 'main', whose length also happens to be 1.
+    s = host(s, { type: 'moreCommits', ref: 'main', skip: 1, commits: [commit('stale')], hasMore: true });
+    expect(s.commits.map((c) => c.hash)).toEqual(['d1']);
     expect(s.loadingMore).toBe(false);
   });
 
@@ -268,6 +296,23 @@ describe('reducer: UI actions', () => {
     s = reducer(s, { type: 'ui/selectBranch', branch: s.branches[1] });
     expect(s.selectedRef).toBe('refs/heads/dev');
     expect(s.selectedHash).toBeNull();
+  });
+
+  it('moves the tracking counts onto the selected branch immediately', () => {
+    let s = host(initialState, dataMsg({ tracking: { ahead: 1, behind: 2 } }));
+    // A branch carrying its own ahead/behind replaces the header counts now,
+    // before any branchCommits/data round-trip.
+    s = reducer(s, {
+      type: 'ui/selectBranch',
+      branch: { ...branch({ name: 'dev', ahead: 5, behind: 3, upstream: 'origin/dev' }), refShort: 'refs/heads/dev' },
+    });
+    expect(s.tracking).toEqual({ ahead: 5, behind: 3, upstream: 'origin/dev' });
+    // A branch with no upstream resets the counts to zero.
+    s = reducer(s, {
+      type: 'ui/selectBranch',
+      branch: { ...branch({ name: 'orphan' }), refShort: 'refs/heads/orphan' },
+    });
+    expect(s.tracking).toEqual({ ahead: 0, behind: 0, upstream: undefined });
   });
 
   it('toggles tree groups', () => {

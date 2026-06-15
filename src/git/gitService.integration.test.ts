@@ -11,7 +11,7 @@
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { basename, dirname, isAbsolute, join, sep } from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { GitService } from './gitService';
 
@@ -532,6 +532,49 @@ describe('real git: edge-case repository states', () => {
     const notARepo = mkdtempSync(join(tmpdir(), 'gbv-norepo-'));
     cleanups.push(notARepo);
     expect(await GitService.findRepoRoot(notARepo)).toBeUndefined();
+  });
+
+  describe('getGitDirs (worktree/packed-ref watching)', () => {
+    it('returns a single .git for a normal repo, and undefined for a non-repo', async () => {
+      const repo = makeRepo();
+      repo.write('a.txt', 'a\n');
+      repo.commit('init');
+
+      const dirs = await GitService.getGitDirs(repo.dir);
+      expect(dirs).toBeDefined();
+      expect(isAbsolute(dirs!.gitDir)).toBe(true);
+      // A normal checkout's git dir and common dir are the same `.git` folder.
+      expect(dirs!.gitDir).toBe(dirs!.commonDir);
+      expect(basename(dirs!.gitDir)).toBe('.git');
+      // Matches git's own answer (sidesteps /tmp symlink differences).
+      expect(dirs!.gitDir).toBe(repo.run('rev-parse', '--absolute-git-dir').trim());
+
+      const notARepo = mkdtempSync(join(tmpdir(), 'gbv-norepo-'));
+      cleanups.push(notARepo);
+      expect(await GitService.getGitDirs(notARepo)).toBeUndefined();
+    });
+
+    it('resolves a linked worktree to its own git dir plus the shared common dir', async () => {
+      const repo = makeRepo();
+      repo.write('a.txt', 'a\n');
+      repo.commit('init');
+
+      // `git worktree add` creates the directory; keep it out of the workspace.
+      const wtPath = `${repo.dir}-wt`;
+      cleanups.push(wtPath);
+      repo.run('worktree', 'add', wtPath, '-b', 'wt');
+
+      const dirs = await GitService.getGitDirs(wtPath);
+      expect(dirs).toBeDefined();
+      expect(isAbsolute(dirs!.gitDir)).toBe(true);
+      expect(isAbsolute(dirs!.commonDir)).toBe(true);
+      // The worktree's git dir lives under <main>/.git/worktrees/<name> …
+      expect(dirs!.gitDir).toContain(`${sep}worktrees${sep}`);
+      expect(dirs!.gitDir).toBe(repo.run('-C', wtPath, 'rev-parse', '--absolute-git-dir').trim());
+      // … while the common dir is the main repo's shared `.git`.
+      expect(dirs!.commonDir).not.toBe(dirs!.gitDir);
+      expect(basename(dirs!.commonDir)).toBe('.git');
+    });
   });
 });
 

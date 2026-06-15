@@ -357,8 +357,13 @@
             "iso",
             "local"
           ],
+          "enumDescriptions": [
+            "Relative: a coarse \"3 days ago\"-style label.",
+            "ISO: a stable YYYY-MM-DD HH:mm rendering in local time.",
+            "Local: the locale's own date and time format."
+          ],
           "default": "local",
-          "description": "How commit dates are displayed in the Date column."
+          "description": "How commit dates are displayed in the Date column of the webview graph. (The native commit list always shows the local format.)"
         },
         "gitBranchView.pullStrategy": {
           "type": "string",

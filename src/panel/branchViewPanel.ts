@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { GitService } from '../git/gitService';
+import { activeEditorRepoRoot, resolveRepoRoot } from '../git/resolveRepo';
 import {
   ensureClean,
+  getDateFormat,
   getPullStrategy,
   pushWithRecovery,
   setPullStrategy,
@@ -121,6 +123,28 @@ export class BranchViewPanel {
       this.disposables
     );
 
+    // Re-resolve the repository when the workspace folders change (a folder was
+    // added/removed/reordered): the cached GitService may now point at a folder
+    // that's gone, or a better candidate may have appeared.
+    vscode.workspace.onDidChangeWorkspaceFolders(
+      () => {
+        this.git = undefined;
+        this.repoRoot = undefined;
+        void this.loadAll();
+      },
+      null,
+      this.disposables
+    );
+
+    // In a multi-root workspace, follow the active editor: switching to a file
+    // in a different in-workspace repo retargets the view to that repo, so the
+    // active-editor preference isn't only honoured on the first resolution.
+    vscode.window.onDidChangeActiveTextEditor(
+      () => void this.retargetToActiveEditor(),
+      null,
+      this.disposables
+    );
+
     // Initial data load once the webview signals it's ready.
   }
 
@@ -153,17 +177,52 @@ export class BranchViewPanel {
       this.post({ type: 'error', message: 'Open a folder that is a Git repository.' });
       return undefined;
     }
-    for (const f of folders) {
-      const root = await GitService.findRepoRoot(f.uri.fsPath, this.logger);
-      if (root) {
-        this.git = new GitService(root, this.logger);
-        this.repoRoot = root;
-        this.post({ type: 'repo', root });
-        return this.git;
-      }
+    // Prefers the active editor's repo in multi-root workspaces (shared with
+    // the native UI so both resolve the same repo).
+    const root = await resolveRepoRoot(this.logger);
+    if (root) {
+      this.git = new GitService(root, this.logger);
+      this.repoRoot = root;
+      this.post({ type: 'repo', root });
+      return this.git;
     }
     this.post({ type: 'error', message: 'No Git repository found in the workspace.' });
     return undefined;
+  }
+
+  /**
+   * Multi-root only: when the active editor moves to a file owned by a
+   * *different* in-workspace repo, swap the resolved repository to follow it.
+   * Git is asked which repo actually owns the file rather than assuming
+   * path-containment implies the same repo — a nested repository inside the
+   * current repoRoot would otherwise be masked (its files sit under the parent's
+   * path yet belong to the nested repo). Re-resolving to the same repo is a
+   * no-op, and an editor with no file (e.g. focusing the panel) or one outside
+   * the workspace is ignored, so the view never snaps away on its own.
+   */
+  private async retargetToActiveEditor(): Promise<void> {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length < 2) {
+      return;
+    }
+    const active = vscode.window.activeTextEditor?.document.uri;
+    if (!active || active.scheme !== 'file') {
+      return;
+    }
+    const root = await activeEditorRepoRoot(this.logger);
+    if (!root || root === this.repoRoot) {
+      return;
+    }
+    // Adopted a different repo: its diff URIs and history replace the old one.
+    this.git = new GitService(root, this.logger);
+    this.repoRoot = root;
+    this.post({ type: 'repo', root });
+    // The persisted focus belongs to the previous repo; follow the new repo's
+    // HEAD and reset the loaded depth.
+    this.setFocus(undefined);
+    this.lastCurrent = undefined;
+    this.loadedCount = 0;
+    await this.loadAll();
   }
 
   /**
@@ -208,16 +267,35 @@ export class BranchViewPanel {
       // Show the focused ref's history, defaulting to the current branch.
       const focus = this.focusedRef ?? (current || undefined);
 
-      const [page, branches, tracking] = await Promise.all([
+      const [page, branches] = await Promise.all([
         this.getPage(git, focus ? [focus] : undefined, 0, limit).catch(() => {
           // Focused ref vanished (deleted/renamed) — fall back to all branches.
           this.setFocus(undefined);
           return this.getPage(git, undefined, 0, limit);
         }),
         git.getBranches(),
-        git.getTracking(),
       ]);
       this.loadedCount = page.commits.length;
+
+      // The ref whose history is actually shown (re-read after the catch above,
+      // which clears focus when the focused ref vanished).
+      const effectiveFocus = this.focusedRef ?? (current || undefined);
+
+      // Tracking counts must reflect the DISPLAYED branch, not always HEAD.
+      // for-each-ref already carries each branch's ahead/behind vs its upstream
+      // (see getBranches), so use the focused branch's own counts; fall back to
+      // HEAD's tracking only when the focused ref isn't a known branch (a
+      // detached hash or a vanished ref).
+      const focusedBranch = effectiveFocus
+        ? branches.find((b) => b.refName === effectiveFocus || b.name === effectiveFocus)
+        : undefined;
+      const tracking = focusedBranch
+        ? {
+            ahead: focusedBranch.ahead ?? 0,
+            behind: focusedBranch.behind ?? 0,
+            upstream: focusedBranch.upstream,
+          }
+        : await git.getTracking();
 
       this.post({
         type: 'data',
@@ -226,8 +304,9 @@ export class BranchViewPanel {
         hasMore: page.hasMore,
         tracking,
         current,
-        focused: (this.focusedRef ?? (current || undefined)) ?? null,
+        focused: effectiveFocus ?? null,
         pullStrategy: getPullStrategy(),
+        dateFormat: getDateFormat(),
         columnWidths: this.getColumnWidths(),
       });
     } catch (err) {
@@ -291,6 +370,10 @@ export class BranchViewPanel {
           this.loadedCount = skip + page.commits.length;
           this.post({
             type: 'moreCommits',
+            // Stamp the scope so the webview can reject this page if it switched
+            // to a different branch while it was in flight (a stale append would
+            // otherwise splice this ref's commits into the other branch).
+            ref: focus ?? null,
             skip,
             commits: page.commits,
             hasMore: page.hasMore,
