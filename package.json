@@ -2,7 +2,7 @@
   "name": "git-branch-view",
   "displayName": "Git Branch View",
   "description": "Simple Git branch view for VS Code",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "msdrx",
   "author": {
     "name": "Mikheil Sadradze",
@@ -14,7 +14,7 @@
     "url": "https://github.com/msdrx/git-branch-view.git"
   },
   "gitBranchViewDefaults": {
-    "ui": "both"
+    "ui": "webview"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -395,7 +395,7 @@
     "shots": "bash e2e/run-shots.sh",
     "shots:both": "bash e2e/run-both.sh",
     "configure-ui": "node scripts/configure-ui.js",
-    "package": "node scripts/configure-ui.js both && bash scripts/package-vsix.sh",
+    "package": "node scripts/configure-ui.js webview && bash scripts/package-vsix.sh",
     "install:dev": "bash scripts/install-dev-extension.sh"
   },
   "devDependencies": {

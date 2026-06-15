@@ -50,6 +50,7 @@ export class BranchViewPanel {
    * position) survives; selecting a branch resets it to one page.
    */
   private loadedCount = 0;
+  private disposed = false;
   /**
    * Incremented whenever the panel adopts or clears a repo. Async git calls
    * capture this value and drop their result if a later active-editor retarget
@@ -85,6 +86,10 @@ export class BranchViewPanel {
     };
 
     BranchViewPanel.current = new BranchViewPanel(panel, context, logger);
+  }
+
+  static disposeCurrent(): void {
+    BranchViewPanel.current?.dispose();
   }
 
   private constructor(
@@ -688,6 +693,10 @@ export class BranchViewPanel {
   }
 
   private dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
     BranchViewPanel.current = undefined;
     this.panel.dispose();
     while (this.disposables.length) {

@@ -179,8 +179,13 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
-export function deactivate(): void {
-  /* nothing to clean up beyond context.subscriptions */
+export async function deactivate(): Promise<void> {
+  BranchViewPanel.disposeCurrent();
+  await Promise.all([
+    vscode.commands.executeCommand('setContext', 'gitBranchView.nativeEnabled', false),
+    vscode.commands.executeCommand('setContext', 'gitBranchView.noRepo', false),
+    vscode.commands.executeCommand('setContext', 'gitBranchView.uiMode', undefined),
+  ]);
 }
 
 /** True when `dir` is the same as, or nested inside, any workspace folder. */

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Bake the default UI mode into package.json's `gitBranchViewDefaults.ui`
-// field. The packaged extension reads this at runtime when the user's
-// `gitBranchView.ui` setting is left at "auto" (the default), so packaging
-// with a given mode picks which front-end ships as the out-of-the-box default.
+// field. The VSIX always includes all contributed UI modes; this value only
+// decides which one opens by default when the user's `gitBranchView.ui`
+// setting is left at "auto" (the default).
 //
-//   node scripts/configure-ui.js webview   # graph + columns (historical default)
-//   node scripts/configure-ui.js native    # built-in tree views
-//   node scripts/configure-ui.js both      # webview window + native tree views together
+//   node scripts/configure-ui.js webview   # default to graph + columns
+//   node scripts/configure-ui.js native    # default to built-in tree views
+//   node scripts/configure-ui.js both      # default to both UIs together
 //
-// Used by the `package` npm script (which bakes `both`). Users can still
+// Used by the `package` npm script (which bakes `webview`). Users can still
 // override the baked default at runtime via the `gitBranchView.ui` setting
 // or the "Git Branches: Select UI Mode…" command.
 'use strict';
