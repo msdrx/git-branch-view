@@ -563,10 +563,20 @@ export class BranchViewPanel {
           break;
         }
 
-        case 'merge':
+        case 'merge': {
+          if (
+            !(await ensureClean(
+              git,
+              `You have uncommitted changes in the working directory. ` +
+                `Commit them before merging "${displayRefName(msg.branch)}".`
+            ))
+          ) {
+            break;
+          }
           await git.merge(msg.branch);
           await this.loadAll();
           break;
+        }
 
         case 'fetch':
           await git.fetch();

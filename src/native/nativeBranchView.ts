@@ -306,6 +306,15 @@ export class NativeBranchView implements vscode.Disposable {
   }
 
   private async merge(git: GitService, branch: string): Promise<void> {
+    if (
+      !(await ensureClean(
+        git,
+        `You have uncommitted changes in the working directory. ` +
+          `Commit them before merging "${displayRefName(branch)}".`
+      ))
+    ) {
+      return;
+    }
     await git.merge(branch);
     await this.refresh();
   }
