@@ -111,7 +111,19 @@ describe('BranchPane', () => {
       (n) => n.textContent
     );
     expect(groups).toEqual(['Branches', 'remotes/origin']);
+  });
+
+  it('collapses remote groups by default', () => {
+    renderPane();
     // The remote branch label drops the remote prefix.
+    const labels = [...document.querySelectorAll('#tree .tree-node:not(.group) .label')].map(
+      (n) => n.textContent
+    );
+    expect(labels).toEqual(['main', 'feature/login']);
+  });
+
+  it('expands a remote group after its default collapsed state is toggled off', () => {
+    renderPane({ collapsed: { 'remote:origin': false } });
     const labels = [...document.querySelectorAll('#tree .tree-node:not(.group) .label')].map(
       (n) => n.textContent
     );

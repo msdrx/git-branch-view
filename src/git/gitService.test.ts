@@ -6,7 +6,6 @@ import {
   normalizeRefArgument,
   parseRefs,
   parseTrack,
-  quote,
   type GitExecFn,
 } from './gitService';
 
@@ -14,27 +13,31 @@ const NUL = '\x00';
 const RS = '\x1e';
 
 /**
- * GitService wired to canned output, recording every command it runs. The
- * one-time `git --version` capability probe is answered from `version` (a
- * modern git by default, so `--end-of-options` is used) and is NOT recorded, so
- * command-index assertions stay stable.
+ * GitService wired to canned output, recording every command it runs as an argv
+ * ARRAY (no shell, no quoting). The one-time `git --version` capability probe is
+ * answered from `version` (a modern git by default, so `--end-of-options` is
+ * used) and is NOT recorded, so command-index assertions stay stable.
+ *
+ * `responses` are still keyed/matched against a `git <args joined by space>`
+ * string for ergonomics; only the recorded `commands` are arrays.
  */
 function fakeGit(
   responses: Record<string, string> | ((cmd: string) => string),
   version = '2.51.0'
 ) {
-  const commands: string[] = [];
-  const exec: GitExecFn = async (command) => {
-    if (command === 'git --version') {
+  const commands: string[][] = [];
+  const exec: GitExecFn = async (args) => {
+    const joined = `git ${args.join(' ')}`;
+    if (joined === 'git --version') {
       return { stdout: `git version ${version}\n` };
     }
-    commands.push(command);
+    commands.push(args);
     const out =
       typeof responses === 'function'
-        ? responses(command)
-        : Object.entries(responses).find(([prefix]) => command.startsWith(prefix))?.[1];
+        ? responses(joined)
+        : Object.entries(responses).find(([prefix]) => joined.startsWith(prefix))?.[1];
     if (out === undefined) {
-      throw new Error(`unexpected command: ${command}`);
+      throw new Error(`unexpected command: ${joined}`);
     }
     return { stdout: out };
   };
@@ -58,15 +61,8 @@ describe('parseRefs', () => {
   });
 });
 
-describe('quote', () => {
-  it('single-quotes and escapes embedded quotes', () => {
-    expect(quote('main')).toBe(`'main'`);
-    expect(quote("a'b")).toBe(`'a'\\''b'`);
-  });
-});
-
 describe('normalizeRefArgument', () => {
-  it('unwraps a whole shell-quoted ref before GitService quotes it', () => {
+  it('unwraps a legacy shell-quoted persisted ref so argv passes it cleanly', () => {
     expect(normalizeRefArgument(`'features/net10'`)).toBe('features/net10');
     expect(normalizeRefArgument(`'wip/ada'\\''s-fix'`)).toBe("wip/ada's-fix");
   });
@@ -124,21 +120,27 @@ describe('GitService.getCommits', () => {
     });
     expect(commits[1].parents).toEqual([]);
     // Default scope is all branches + remotes.
-    expect(commands[0]).toContain('--branches --remotes');
+    expect(commands[0]).toContain('--branches');
+    expect(commands[0]).toContain('--remotes');
     expect(commands[0]).toContain('--max-count=100');
   });
 
-  it('quotes each requested ref individually', async () => {
+  it('passes each requested ref as its own argv element after the marker', async () => {
     const { git, commands } = fakeGit({ 'git log': '' });
     await git.getCommits(10, ['feature/x']);
-    expect(commands[0]).toContain(`'feature/x'`);
+    expect(commands[0]).toContain('feature/x');
+    expect(commands[0].indexOf('--end-of-options')).toBeLessThan(
+      commands[0].indexOf('feature/x')
+    );
   });
 
   it('does not pass stale shell quotes through to git when scoping branch history', async () => {
     const { git, commands } = fakeGit({ 'git log': '' });
     await git.getCommits(10, [`'features/net10'`]);
-    expect(commands[0]).toContain(`--end-of-options 'features/net10'`);
-    expect(commands[0]).not.toContain(`''features/net10''`);
+    // The legacy single-quoted value is unwrapped to the bare ref.
+    expect(commands[0]).toContain('features/net10');
+    expect(commands[0]).not.toContain(`'features/net10'`);
+    expect(commands[0]).toContain('--end-of-options');
   });
 
   it('passes --skip when paging, and omits it for the first page', async () => {
@@ -147,7 +149,7 @@ describe('GitService.getCommits', () => {
     await git.getCommits(10, ['main']);
     expect(commands[0]).toContain('--skip=30');
     expect(commands[0]).toContain('--max-count=10');
-    expect(commands[1]).not.toContain('--skip');
+    expect(commands[1].some((a) => a.startsWith('--skip'))).toBe(false);
   });
 });
 
@@ -174,7 +176,11 @@ describe('GitService.pull', () => {
     await git.pull('merge');
     await git.pull('rebase');
     await git.pull('ff-only');
-    expect(commands).toEqual(['git pull --no-rebase', 'git pull --rebase', 'git pull --ff-only']);
+    expect(commands).toEqual([
+      ['pull', '--no-rebase'],
+      ['pull', '--rebase'],
+      ['pull', '--ff-only'],
+    ]);
   });
 });
 
@@ -195,13 +201,19 @@ describe('GitService.compare', () => {
       { status: 'A', path: 'docs/new.md' },
     ]);
     expect(result.mergeBase).toBe('feedc0de1234');
-    // The log range is a single shell word containing the `..` operator.
-    expect(commands[0]).toContain(`'main..dev'`);
-    expect(commands[1]).toContain(`'dev..main'`);
-    expect(commands[2]).toContain(`merge-base --end-of-options 'main' 'dev'`);
+    // The log range is a single argv element containing the `..` operator.
+    expect(commands[0]).toContain('main..dev');
+    expect(commands[1]).toContain('dev..main');
+    expect(commands[2]).toEqual(['merge-base', '--end-of-options', 'main', 'dev']);
     // The file diff must use -z so odd paths arrive unquoted, and pin the refs
     // behind --end-of-options so an option-looking ref can't inject an option.
-    expect(commands[3]).toContain(`diff --name-status -z --end-of-options 'main'...'dev'`);
+    expect(commands[3]).toEqual([
+      'diff',
+      '--name-status',
+      '-z',
+      '--end-of-options',
+      'main...dev',
+    ]);
   });
 });
 
@@ -257,7 +269,7 @@ describe('GitService.getCommitDetail', () => {
   it('diffs a normal commit against its first parent with -z', async () => {
     const { git, commands } = detailGit({ meta: meta('aaa', 'p1') });
     await git.getCommitDetail('aaa');
-    expect(commands[2]).toBe(`git diff --name-status -z --end-of-options 'aaa^' 'aaa'`);
+    expect(commands[2]).toEqual(['diff', '--name-status', '-z', '--end-of-options', 'aaa^', 'aaa']);
   });
 
   it('diffs a merge commit against its FIRST parent (not the combined diff)', async () => {
@@ -270,7 +282,7 @@ describe('GitService.getCommitDetail', () => {
     });
     const d = await git.getCommitDetail('mmm');
     expect(d.commit.parents).toEqual(['p1', 'p2']);
-    expect(commands[2]).toBe(`git diff --name-status -z --end-of-options 'mmm^' 'mmm'`);
+    expect(commands[2]).toEqual(['diff', '--name-status', '-z', '--end-of-options', 'mmm^', 'mmm']);
     expect(d.files).toEqual([{ status: 'A', path: 'feature.txt' }]);
   });
 
@@ -281,7 +293,14 @@ describe('GitService.getCommitDetail', () => {
     });
     const d = await git.getCommitDetail('r00t');
     expect(d.commit.parents).toEqual([]);
-    expect(commands[2]).toBe(`git show --name-status -z --format= --end-of-options 'r00t'`);
+    expect(commands[2]).toEqual([
+      'show',
+      '--name-status',
+      '-z',
+      '--format=',
+      '--end-of-options',
+      'r00t',
+    ]);
     expect(d.files).toEqual([{ status: 'A', path: 'a.txt' }]);
   });
 
@@ -318,11 +337,11 @@ describe('GitService.getCommitDetail', () => {
 });
 
 describe('GitService.getFileAtRef', () => {
-  it('quotes ref:path as one shell word and returns the blob verbatim', async () => {
+  it('passes ref:path as one argv element and returns the blob verbatim', async () => {
     const { git, commands } = fakeGit({ 'git show': 'const x = 1;\n' });
     const out = await git.getFileAtRef('abc123', 'src/with space/naïve.ts');
     expect(out).toBe('const x = 1;\n');
-    expect(commands[0]).toBe(`git show --end-of-options 'abc123:src/with space/naïve.ts'`);
+    expect(commands[0]).toEqual(['show', '--end-of-options', 'abc123:src/with space/naïve.ts']);
   });
 
   it('returns the empty string when the path is missing on that side', async () => {
@@ -352,9 +371,10 @@ describe('argument/option injection hardening', () => {
     await git.getCommits(10, ['--output=/tmp/pwned']);
     // The malicious ref sits AFTER the marker, so git can never read it as the
     // --output option; --branches/--remotes are real options and stay before.
-    expect(commands[0]).toContain(`--end-of-options '--output=/tmp/pwned'`);
+    expect(commands[0]).toContain('--end-of-options');
+    expect(commands[0]).toContain('--output=/tmp/pwned');
     expect(commands[0].indexOf('--end-of-options')).toBeLessThan(
-      commands[0].indexOf(`'--output=/tmp/pwned'`)
+      commands[0].indexOf('--output=/tmp/pwned')
     );
   });
 
@@ -376,17 +396,17 @@ describe('argument/option injection hardening', () => {
 
     expect(commands).toEqual(
       expect.arrayContaining([
-        `git merge --end-of-options 'dev'`,
-        `git branch -d --end-of-options 'old'`,
-        `git branch -D --end-of-options 'old'`,
-        `git show --end-of-options 'HEAD:a.ts'`,
-        `git push --set-upstream --end-of-options 'origin' 'feature'`,
+        ['merge', '--end-of-options', 'dev'],
+        ['branch', '-d', '--end-of-options', 'old'],
+        ['branch', '-D', '--end-of-options', 'old'],
+        ['show', '--end-of-options', 'HEAD:a.ts'],
+        ['push', '--set-upstream', '--end-of-options', 'origin', 'feature'],
       ])
     );
     // getCommitDetail's metadata, body, and diff all carry the marker too.
-    expect(commands.some((c) => c.startsWith('git show -s') && c.includes('--end-of-options'))).toBe(
-      true
-    );
+    expect(
+      commands.some((c) => c[0] === 'show' && c[1] === '-s' && c.includes('--end-of-options'))
+    ).toBe(true);
   });
 
   it('checkout never uses --end-of-options (git <= 2.43 parses it as a pathspec)', async () => {
@@ -396,14 +416,14 @@ describe('argument/option injection hardening', () => {
     // the bare ref on EVERY git version, modern probe result notwithstanding.
     const { git, commands } = fakeGit({ 'git checkout': '' }, '2.51.0');
     await git.checkout('feature/test');
-    expect(commands[0]).toBe(`git checkout 'feature/test'`);
+    expect(commands[0]).toEqual(['checkout', 'feature/test']);
     expect(commands[0]).not.toContain('--end-of-options');
   });
 
   it('checkout accepts a full local ref without detaching HEAD', async () => {
     const { git, commands } = fakeGit({ 'git checkout': '' }, '2.51.0');
     await git.checkout('refs/heads/feature/test');
-    expect(commands[0]).toBe(`git checkout 'feature/test'`);
+    expect(commands[0]).toEqual(['checkout', 'feature/test']);
   });
 
   it('checkout rejects an option-looking branch instead of shelling out', async () => {
@@ -419,7 +439,7 @@ describe('argument/option injection hardening', () => {
     // file(s)"), so the marker must be dropped — a real ref runs without it.
     const { git, commands } = fakeGit({ 'git merge': '' }, '2.23.4');
     await git.merge('main');
-    expect(commands[0]).toBe(`git merge 'main'`);
+    expect(commands[0]).toEqual(['merge', 'main']);
     expect(commands[0]).not.toContain('--end-of-options');
   });
 
@@ -438,6 +458,6 @@ describe('argument/option injection hardening', () => {
     expect(commands).toHaveLength(0); // rejected before any git ran
 
     await git.createBranch('feature/x', 'main');
-    expect(commands[0]).toBe(`git checkout -b 'feature/x' 'main'`);
+    expect(commands[0]).toEqual(['checkout', '-b', 'feature/x', 'main']);
   });
 });

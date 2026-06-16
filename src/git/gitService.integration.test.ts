@@ -278,7 +278,7 @@ describe('real git: commit change information', () => {
       );
     });
 
-    it('serves unicode and spaced paths through the shell quoting', async () => {
+    it('serves unicode and spaced paths as single argv arguments', async () => {
       expect(await repo.service.getFileAtRef('HEAD', 'data/naïve-ünïcode.txt')).toBe('müller\n');
       expect(await repo.service.getFileAtRef(rootHash, 'docs/read me.md')).toBe('# docs\n');
     });
@@ -445,7 +445,7 @@ describe('real git: working tree and write operations', () => {
     expect(await repo.service.isDirty()).toBe(true);
   });
 
-  it('survives branch names with quotes through the shell (create/checkout/delete)', async () => {
+  it('survives branch names with quotes as argv arguments (create/checkout/delete)', async () => {
     const repo = makeRepo();
     repo.write('a.txt', 'a\n');
     repo.commit('init');

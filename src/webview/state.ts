@@ -111,6 +111,10 @@ export const initialState: AppState = {
   error: null,
 };
 
+export function defaultGroupCollapsed(key: string): boolean {
+  return key.startsWith('remote:');
+}
+
 export type Action =
   | { type: 'host'; msg: HostMessage }
   | { type: 'ui/selectBranch'; branch: Branch }
@@ -172,7 +176,10 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'ui/toggleGroup':
       return {
         ...state,
-        collapsed: { ...state.collapsed, [action.key]: !state.collapsed[action.key] },
+        collapsed: {
+          ...state.collapsed,
+          [action.key]: !(state.collapsed[action.key] ?? defaultGroupCollapsed(action.key)),
+        },
       };
     case 'ui/setCompareBase':
       return { ...state, compareBase: action.base, pendingCompare: null };

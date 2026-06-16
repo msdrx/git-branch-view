@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Branch, FileChange } from '../types';
 import { branchDisplayName } from '../format';
+import { defaultGroupCollapsed } from '../state';
 
 /** What the Changes pane shows: a commit's files or a comparison's files. */
 export interface ChangesView {
@@ -50,7 +51,7 @@ export function BranchPane(props: BranchPaneProps) {
 
   const group = (label: string, icon: string, items: Branch[], indent: 1 | 2, key?: string) => {
     const groupKey = key || label;
-    const isCollapsed = !!collapsed[groupKey];
+    const isCollapsed = collapsed[groupKey] ?? defaultGroupCollapsed(groupKey);
     return (
       <React.Fragment key={groupKey}>
         <div className="tree-node group" onClick={() => onToggleGroup(groupKey)}>

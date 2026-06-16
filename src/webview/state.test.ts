@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialState, reducer, type AppState } from './state';
+import { defaultGroupCollapsed, initialState, reducer, type AppState } from './state';
 import type { Branch, Commit, HostMessage } from './types';
 
 const branch = (over: Partial<Omit<Branch, 'refShort'>>): Omit<Branch, 'refShort'> => {
@@ -317,9 +317,14 @@ describe('reducer: UI actions', () => {
 
   it('toggles tree groups', () => {
     let s = reducer(initialState, { type: 'ui/toggleGroup', key: 'remote:origin' });
-    expect(s.collapsed['remote:origin']).toBe(true);
-    s = reducer(s, { type: 'ui/toggleGroup', key: 'remote:origin' });
+    expect(defaultGroupCollapsed('remote:origin')).toBe(true);
     expect(s.collapsed['remote:origin']).toBe(false);
+    s = reducer(s, { type: 'ui/toggleGroup', key: 'remote:origin' });
+    expect(s.collapsed['remote:origin']).toBe(true);
+
+    s = reducer(initialState, { type: 'ui/toggleGroup', key: 'Branches' });
+    expect(defaultGroupCollapsed('Branches')).toBe(false);
+    expect(s.collapsed.Branches).toBe(true);
   });
 
   it('opens and closes the context menu', () => {

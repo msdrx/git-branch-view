@@ -30,7 +30,12 @@ export class BranchesProvider implements vscode.TreeDataProvider<BranchTreeNode>
 
   getTreeItem(node: BranchTreeNode): vscode.TreeItem {
     if (node.kind === 'group') {
-      const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
+      const item = new vscode.TreeItem(
+        node.label,
+        node.remote
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.Expanded
+      );
       item.contextValue = 'gbv.group';
       item.iconPath = new vscode.ThemeIcon(node.remote ? 'cloud' : 'repo');
       return item;

@@ -1,8 +1,21 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+/**
+ * The default exec: runs git WITHOUT a shell via `execFile`, passing arguments
+ * as an argv array. This is the single most important property of this module:
+ * because there is no shell, arguments need no quoting and cross-platform
+ * shell-quoting differences disappear. (The previous implementation built one
+ * command string and ran it through a shell, which on Windows is `cmd.exe` —
+ * and `cmd.exe` does not treat POSIX single quotes as quoting, so every quoted
+ * ref reached git with literal quotes: `fatal: ambiguous argument ''<hash>''`.)
+ * `windowsHide` suppresses a console-window flash on Windows.
+ */
+const execAsync: GitExecFn = (args, options) =>
+  execFileAsync('git', args, { ...options, windowsHide: true });
 
 /**
  * Field/record separators used to split git's OUTPUT. These are the real bytes.
@@ -13,9 +26,10 @@ const RECORD_SEP = '\x1e'; // record separator
 
 /**
  * Git format placeholders that make git EMIT the separators above in its output.
- * We must never put a raw NUL byte in the command string itself — it would
- * truncate the shell command. So the format string carries placeholder *text*
- * and git renders the real bytes. Note the syntax differs per subcommand:
+ * We never put a raw NUL byte in an argv element — `execFile` rejects arguments
+ * containing NUL outright. So the format string carries placeholder *text* and
+ * git renders the real bytes in its output. Note the syntax differs per
+ * subcommand:
  *   - `git log --format` understands the hex escape `%x00` / `%x1e`.
  *   - `git for-each-ref --format` understands `%00` but NOT `%x00`.
  */
@@ -30,11 +44,12 @@ const FMT_FIELD_REF = '%00';
  * `--output=/path` (creatable as a ref name in a malicious repository, or
  * arriving through a compare range) can never be parsed as a git option, which
  * would otherwise be an arbitrary-file-write / argument-injection primitive.
- * Shell-quoting (see `quote`) stops shell metacharacter injection but does NOT
- * stop git's own option parsing — this does. Supported by git since 2.24; on
- * older git the token is unknown and would be parsed as a pathspec (the
- * "did not match any file(s)" error), so `refBarrier()` omits it there and
- * falls back to `assertNotOption()` validation to keep the same protection.
+ * Passing arguments as argv (no shell) stops shell metacharacter injection, but
+ * does NOT stop git's own option parsing — this marker does. Supported by git
+ * since 2.24; on older git the token is unknown and would be parsed as a
+ * pathspec (the "did not match any file(s)" error), so `refBarrier()` omits it
+ * there and falls back to `assertNotOption()` validation to keep the same
+ * protection.
  */
 const END_OF_OPTIONS = '--end-of-options';
 
@@ -125,12 +140,13 @@ export interface Logger {
  * comparison ranges.
  */
 /**
- * Shape of the exec function GitService shells out through. Injectable so unit
- * tests can feed canned git output without spawning processes; defaults to the
- * real promisified `child_process.exec`.
+ * Shape of the exec function GitService runs git through. It receives the git
+ * arguments as an argv ARRAY (no `git` prefix, no shell) and returns stdout.
+ * Injectable so unit tests can feed canned git output without spawning
+ * processes; defaults to `execAsync` (a no-shell `execFile`).
  */
 export type GitExecFn = (
-  command: string,
+  args: string[],
   options: { cwd: string; maxBuffer: number; env: NodeJS.ProcessEnv }
 ) => Promise<{ stdout: string }>;
 
@@ -141,19 +157,20 @@ export class GitService {
     private readonly execFn: GitExecFn = execAsync
   ) {}
 
-  private async git(args: string): Promise<string> {
+  private async git(args: string[]): Promise<string> {
     const start = Date.now();
+    const display = `git ${args.join(' ')}`;
     try {
-      const { stdout } = await this.execFn(`git ${args}`, {
+      const { stdout } = await this.execFn(args, {
         cwd: this.repoRoot,
         maxBuffer: 64 * 1024 * 1024,
         // Keep output stable/parseable regardless of user config.
         env: { ...process.env, GIT_PAGER: 'cat', LC_ALL: 'C' },
       });
-      this.logger?.info(`> git ${args} [${Date.now() - start}ms]`);
+      this.logger?.info(`> ${display} [${Date.now() - start}ms]`);
       return stdout;
     } catch (err) {
-      this.logger?.error(`> git ${args} [${Date.now() - start}ms]\n${String(err)}`);
+      this.logger?.error(`> ${display} [${Date.now() - start}ms]\n${String(err)}`);
       throw err;
     }
   }
@@ -177,7 +194,7 @@ export class GitService {
 
   private async detectEndOfOptions(): Promise<boolean> {
     try {
-      const { stdout } = await this.execFn('git --version', {
+      const { stdout } = await this.execFn(['--version'], {
         cwd: this.repoRoot,
         maxBuffer: 64 * 1024 * 1024,
         env: { ...process.env, GIT_PAGER: 'cat', LC_ALL: 'C' },
@@ -195,39 +212,41 @@ export class GitService {
   }
 
   /**
-   * The option/positional barrier placed before externally-derived refs in a
-   * command (trailing space included so it slots straight in front of the
-   * first quoted ref). On git >= 2.24 it's the `--end-of-options` marker, which
-   * lets even an option-looking ref pass safely as a positional. Older git
-   * doesn't know the marker and would treat it as a pathspec ("did not match
-   * any file(s)" — the very error this guards against), so there we omit it and
+   * The option/positional barrier argv slotted in before externally-derived
+   * refs in a command. On git >= 2.24 it's `['--end-of-options']`, which lets
+   * even an option-looking ref pass safely as a positional. Older git doesn't
+   * know the marker and would treat it as a pathspec ("did not match any
+   * file(s)" — the very error this guards against), so there we return `[]` and
    * instead reject any ref that looks like an option, preserving the
    * argument-injection protection at the cost of refusing the (almost always
    * malicious) option-named ref.
    */
-  private async refBarrier(...refs: string[]): Promise<string> {
+  private async refBarrier(...refs: string[]): Promise<string[]> {
     if (await this.supportsEndOfOptions()) {
-      return `${END_OF_OPTIONS} `;
+      return [END_OF_OPTIONS];
     }
     for (const ref of refs) {
       assertNotOption(ref, 'ref');
     }
-    return '';
+    return [];
   }
 
   /** Resolve the repository root for an arbitrary folder inside a repo. */
   static async findRepoRoot(folder: string, logger?: Logger): Promise<string | undefined> {
-    const args = 'rev-parse --show-toplevel';
+    const args = ['rev-parse', '--show-toplevel'];
     const start = Date.now();
     try {
-      const { stdout } = await execAsync(`git ${args}`, {
+      const { stdout } = await execAsync(args, {
         cwd: folder,
-        env: { ...process.env, LC_ALL: 'C' },
+        maxBuffer: 64 * 1024 * 1024,
+        env: { ...process.env, GIT_PAGER: 'cat', LC_ALL: 'C' },
       });
-      logger?.info(`> git ${args} (in ${folder}) [${Date.now() - start}ms]`);
+      logger?.info(`> git ${args.join(' ')} (in ${folder}) [${Date.now() - start}ms]`);
       return stdout.trim() || undefined;
     } catch (err) {
-      logger?.error(`> git ${args} (in ${folder}) [${Date.now() - start}ms]\n${String(err)}`);
+      logger?.error(
+        `> git ${args.join(' ')} (in ${folder}) [${Date.now() - start}ms]\n${String(err)}`
+      );
       return undefined;
     }
   }
@@ -248,10 +267,15 @@ export class GitService {
     folder: string,
     logger?: Logger
   ): Promise<{ gitDir: string; commonDir: string } | undefined> {
-    const env = { ...process.env, LC_ALL: 'C' };
+    const env = { ...process.env, GIT_PAGER: 'cat', LC_ALL: 'C' };
+    const maxBuffer = 64 * 1024 * 1024;
     try {
       // --absolute-git-dir forces an absolute path for the git dir (git 2.13+).
-      const { stdout } = await execAsync('git rev-parse --absolute-git-dir', { cwd: folder, env });
+      const { stdout } = await execAsync(['rev-parse', '--absolute-git-dir'], {
+        cwd: folder,
+        maxBuffer,
+        env,
+      });
       const gitDir = stdout.trim();
       if (!gitDir) {
         return undefined;
@@ -259,7 +283,11 @@ export class GitService {
       let commonDir = gitDir;
       try {
         // --git-common-dir may be relative to the cwd; resolve it ourselves.
-        const out = await execAsync('git rev-parse --git-common-dir', { cwd: folder, env });
+        const out = await execAsync(['rev-parse', '--git-common-dir'], {
+          cwd: folder,
+          maxBuffer,
+          env,
+        });
         const c = out.stdout.trim();
         if (c) {
           commonDir = path.isAbsolute(c) ? c : path.resolve(folder, c);
@@ -276,7 +304,7 @@ export class GitService {
 
   async getCurrentBranch(): Promise<string> {
     try {
-      const out = await this.git('rev-parse --abbrev-ref HEAD');
+      const out = await this.git(['rev-parse', '--abbrev-ref', 'HEAD']);
       return out.trim();
     } catch {
       return '';
@@ -297,9 +325,12 @@ export class GitService {
       '%(HEAD)',
     ].join(FMT_FIELD_REF);
 
-    const out = await this.git(
-      `for-each-ref --format="${fmt}" refs/heads refs/remotes`
-    );
+    const out = await this.git([
+      'for-each-ref',
+      `--format=${fmt}`,
+      'refs/heads',
+      'refs/remotes',
+    ]);
 
     const branches: BranchInfo[] = [];
     for (const line of out.split('\n')) {
@@ -360,19 +391,23 @@ export class GitService {
     // lineages, which both reorders rows against the Date column and can push
     // recent commits of a parallel branch past the cutoff entirely). Children
     // still always appear before parents, which is all the lane layout needs.
-    const skipArg = skip > 0 ? ` --skip=${Math.floor(skip)}` : '';
+    const args = [
+      'log',
+      '--author-date-order',
+      `--max-count=${Math.floor(limit)}`,
+      ...(skip > 0 ? [`--skip=${Math.floor(skip)}`] : []),
+      `--format=${fmt}${FMT_REC_LOG}`,
+    ];
     // Options FIRST, then the refs after `--end-of-options`, so a ref that
     // looks like a git option can't be parsed as one (argument injection).
-    // `--branches --remotes` ARE real options (select all refs), so that
-    // branch stays before the marker; only caller-supplied refs go after it.
-    const opts =
-      `--author-date-order --max-count=${Math.floor(limit)}${skipArg}` +
-      ` --format="${fmt}${FMT_REC_LOG}"`;
-    const scope =
-      normalizedRefs && normalizedRefs.length
-        ? `${await this.refBarrier(...normalizedRefs)}${normalizedRefs.map(quote).join(' ')}`
-        : '--branches --remotes';
-    const out = await this.git(`log ${opts} ${scope}`);
+    // `--branches --remotes` ARE real options (select all refs), so they stay
+    // before the marker; only caller-supplied refs go after it.
+    if (normalizedRefs && normalizedRefs.length) {
+      args.push(...(await this.refBarrier(...normalizedRefs)), ...normalizedRefs);
+    } else {
+      args.push('--branches', '--remotes');
+    }
+    const out = await this.git(args);
 
     const commits: CommitInfo[] = [];
     for (const raw of out.split(RECORD_SEP)) {
@@ -399,8 +434,10 @@ export class GitService {
   /** Ahead/behind of the current branch vs its upstream (incoming/outgoing). */
   async getTracking(): Promise<{ ahead: number; behind: number; upstream?: string }> {
     try {
-      const upstream = (await this.git('rev-parse --abbrev-ref --symbolic-full-name @{u}')).trim();
-      const counts = (await this.git('rev-list --left-right --count @{u}...HEAD')).trim();
+      const upstream = (
+        await this.git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
+      ).trim();
+      const counts = (await this.git(['rev-list', '--left-right', '--count', '@{u}...HEAD'])).trim();
       const [behind, ahead] = counts.split(/\s+/).map((n) => parseInt(n, 10) || 0);
       return { ahead, behind, upstream };
     } catch {
@@ -411,14 +448,18 @@ export class GitService {
   /** Details + changed files for a single commit. */
   async getCommitDetail(hash: string): Promise<CommitDetail> {
     const fmt = ['%H', '%P', '%an', '%ae', '%aI', '%s', '%D'].join(FMT_FIELD_LOG);
-    const out = await this.git(
-      `show -s --format="${fmt}" ${await this.refBarrier(hash)}${quote(hash)}`
-    );
+    const out = await this.git([
+      'show',
+      '-s',
+      `--format=${fmt}`,
+      ...(await this.refBarrier(hash)),
+      hash,
+    ]);
     const [h, parents, authorName, authorEmail, authorDate, subject, refsStr] =
       out.trim().split(FIELD_SEP);
 
     const body = (
-      await this.git(`show -s --format=%b ${await this.refBarrier(hash)}${quote(hash)}`)
+      await this.git(['show', '-s', '--format=%b', ...(await this.refBarrier(hash)), hash])
     ).trim();
     const parentList = parents ? parents.split(' ').filter(Boolean) : [];
 
@@ -430,8 +471,8 @@ export class GitService {
     // A root commit has no parent, so `show` (diff vs the empty tree) is right.
     const files = await this.parseNameStatus(
       parentList.length
-        ? `diff --name-status -z ${await this.refBarrier(`${h}^`, h)}${quote(`${h}^`)} ${quote(h)}`
-        : `show --name-status -z --format= ${await this.refBarrier(h)}${quote(h)}`
+        ? ['diff', '--name-status', '-z', ...(await this.refBarrier(`${h}^`, h)), `${h}^`, h]
+        : ['show', '--name-status', '-z', '--format=', ...(await this.refBarrier(h)), h]
     );
 
     return {
@@ -459,7 +500,7 @@ export class GitService {
   async getFileAtRef(ref: string, path: string): Promise<string> {
     try {
       const spec = `${ref}:${path}`;
-      return await this.git(`show ${await this.refBarrier(spec)}${quote(spec)}`);
+      return await this.git(['show', ...(await this.refBarrier(spec)), spec]);
     } catch {
       return '';
     }
@@ -467,17 +508,18 @@ export class GitService {
 
   /** Compare two refs: commits unique to each side, and the file diff. */
   async compare(base: string, target: string): Promise<CompareResult> {
-    // Pass the range unquoted; getCommits quotes each ref once. The shell sees
-    // 'base..target' as a single argument and git parses the `..` range itself.
+    // The range is a single argv element so git parses the `..` operator itself.
     const ahead = await this.getCommits(200, [`${base}..${target}`]);
     const behind = await this.getCommits(200, [`${target}..${base}`]);
     const barrier = await this.refBarrier(base, target);
-    const mergeBase = (
-      await this.git(`merge-base ${barrier}${quote(base)} ${quote(target)}`)
-    ).trim();
-    const files = await this.parseNameStatus(
-      `diff --name-status -z ${barrier}${quote(base)}...${quote(target)}`
-    );
+    const mergeBase = (await this.git(['merge-base', ...barrier, base, target])).trim();
+    const files = await this.parseNameStatus([
+      'diff',
+      '--name-status',
+      '-z',
+      ...barrier,
+      `${base}...${target}`,
+    ]);
     return { ahead, behind, files, mergeBase };
   }
 
@@ -488,7 +530,7 @@ export class GitService {
    * branch.
    */
   async isDirty(): Promise<boolean> {
-    const out = await this.git('status --porcelain');
+    const out = await this.git(['status', '--porcelain']);
     return out.trim().length > 0;
   }
 
@@ -506,7 +548,7 @@ export class GitService {
     // '-', so this never refuses a legitimate branch.
     const target = localBranchName(branch);
     assertNotOption(target, 'branch');
-    await this.git(`checkout ${quote(target)}`);
+    await this.git(['checkout', target]);
   }
 
   async createBranch(name: string, startPoint?: string): Promise<void> {
@@ -518,20 +560,24 @@ export class GitService {
     if (startPoint !== undefined) {
       assertNotOption(startPoint, 'start point');
     }
-    await this.git(`checkout -b ${quote(name)}${startPoint ? ' ' + quote(startPoint) : ''}`);
+    const args = ['checkout', '-b', name];
+    if (startPoint) {
+      args.push(startPoint);
+    }
+    await this.git(args);
   }
 
   async deleteBranch(name: string, force = false): Promise<void> {
     const branch = localBranchName(name);
-    await this.git(`branch ${force ? '-D' : '-d'} ${await this.refBarrier(branch)}${quote(branch)}`);
+    await this.git(['branch', force ? '-D' : '-d', ...(await this.refBarrier(branch)), branch]);
   }
 
   async merge(branch: string): Promise<void> {
-    await this.git(`merge ${await this.refBarrier(branch)}${quote(branch)}`);
+    await this.git(['merge', ...(await this.refBarrier(branch)), branch]);
   }
 
   async fetch(): Promise<void> {
-    await this.git('fetch --all --prune');
+    await this.git(['fetch', '--all', '--prune']);
   }
 
   /**
@@ -543,16 +589,16 @@ export class GitService {
   async pull(strategy: PullStrategy = 'merge'): Promise<void> {
     const flag =
       strategy === 'rebase' ? '--rebase' : strategy === 'ff-only' ? '--ff-only' : '--no-rebase';
-    await this.git(`pull ${flag}`);
+    await this.git(['pull', flag]);
   }
 
   async push(): Promise<void> {
-    await this.git('push');
+    await this.git(['push']);
   }
 
   /** Configured remote names, in git's own order (e.g. ['origin']). */
   async getRemotes(): Promise<string[]> {
-    const out = await this.git('remote');
+    const out = await this.git(['remote']);
     return out.split('\n').map((r) => r.trim()).filter(Boolean);
   }
 
@@ -562,9 +608,13 @@ export class GitService {
    * branch that has no upstream yet.
    */
   async pushSetUpstream(branch: string, remote: string): Promise<void> {
-    await this.git(
-      `push --set-upstream ${await this.refBarrier(remote, branch)}${quote(remote)} ${quote(branch)}`
-    );
+    await this.git([
+      'push',
+      '--set-upstream',
+      ...(await this.refBarrier(remote, branch)),
+      remote,
+      branch,
+    ]);
   }
 
   /**
@@ -576,7 +626,7 @@ export class GitService {
    * carry two paths, preserved structurally so literal path text is never
    * confused with a display separator.
    */
-  private async parseNameStatus(args: string): Promise<FileChangeInfo[]> {
+  private async parseNameStatus(args: string[]): Promise<FileChangeInfo[]> {
     const out = await this.git(args);
     const tokens = out.split(FIELD_SEP);
     const files: FileChangeInfo[] = [];
@@ -621,17 +671,13 @@ export function parseRefs(refsStr: string): string[] {
     .filter((r) => r && !r.startsWith('tag: '));
 }
 
-/** Quote a git argument so branch names with odd characters survive the shell. */
-export function quote(arg: string): string {
-  return `'${arg.replace(/'/g, `'\\''`)}'`;
-}
-
 /**
- * Older persisted focus values, or extension/webview boundary values from a
- * previous build, may already be shell-quoted. If passed through `quote` again,
- * git receives literal quote bytes and errors with "ambiguous argument
- * ''main''". Only unwrap a complete POSIX single-quoted shell word; every other
- * ref is left byte-for-byte intact.
+ * Backward-compat shim. Earlier builds shell-quoted refs and could persist a
+ * value that was *already* single-quoted (e.g. a focused ref saved as `'main'`
+ * in workspaceState). Now that refs pass as argv (never quoted), such a stale
+ * value would reach git verbatim and fail ("ambiguous argument ''main''"), so
+ * we unwrap a complete POSIX single-quoted shell word here. Every other ref is
+ * left byte-for-byte intact.
  */
 export function normalizeRefArgument(ref: string): string {
   if (!/^'(?:[^']|'\\'')*'$/.test(ref)) {
