@@ -1,47 +1,59 @@
 # Git Branch View
 
-Simple Git branch view extension for VS Code
+Git Branch View adds a branch browser and commit history view to VS Code.
 
-## Features
+Open a Git repository, then run **Git Branches: Open Branch View** from the
+Command Palette.
 
-- **Branch tree** with local/remote groups, ahead-behind badges, and the
-  current branch highlighted.
-- **Commit graph** with columns (Branch · Message · Author · Date · ID), sticky
-  headers, and ref chips.
-- **Fetch · Pull · Push · Sync** for incoming/outgoing changes.
-- **Context menus**: checkout, new branch, merge, compare, delete, copy ID.
-- **Compare branches** to see commits unique to each side and the changed files.
-- **Click a commit** to view its changed files and open VS Code's real diff
-  editor beside the panel.
-- Auto-refreshes when the repo's branches or HEAD change.
+## What you can do
 
-## Develop & run
+- Browse local and remote branches.
+- See the current branch, ahead/behind counts, commits, authors, dates, and
+  commit IDs.
+- Fetch, pull, push, or sync the checked-out branch.
+- Checkout, create, merge, compare, and delete branches from context menus.
+- Compare two branches and inspect the commits and changed files on each side.
+- Click a commit file to open VS Code's diff editor.
 
-```bash
-npm install
-npm run compile      # or: npm run watch
-```
+## Command Palette
 
-Press **F5** to launch the Extension Development Host. In that window, open a
-Git repository and run **“Git Branches: Open Branch View”** from the Command
-Palette.
+Search for **Git Branches** in the Command Palette:
 
-## Test & package
+- **Open Branch View** opens the selected view mode.
+- **Refresh Branch View** reloads branch and commit data.
+- **Select UI Mode...** switches between Webview, Native, and Both. Reload the
+  VS Code window when prompted.
 
-```bash
-npm test             # unit tests (vitest)
-npm run shots        # e2e screenshots (real VS Code under Xvfb)
-npm run package      # build a .vsix
-```
+When Native or Both mode is enabled, additional **Git Branches** commands are
+available from the Command Palette and context menus:
 
-## How it works
+- **Fetch**, **Pull**, **Push**, **New Branch...**, and **Refresh**.
+- **Set Pull Strategy...** chooses merge, rebase, or fast-forward-only pulls.
+- Branch actions: **Checkout**, **Merge into Current Branch**, **Compare
+  with...**, and **Delete Branch**.
+- Commit actions: **Open Changes**, **Copy Commit ID**, **New Branch from
+  Commit...**, **Checkout Commit (detached)**, and **Load More Commits**.
 
-The extension runs in two parts that talk over `postMessage`: a Node **extension
-host** that shells out to the `git` CLI, and a **React webview** that draws the
-branch tree and graph. It uses the CLI directly (not VS Code's Git API) for full
-control over `git log` graph output and arbitrary compare ranges.
+## View Modes
 
-## 
+Use **Git Branches: Select UI Mode...** or the `gitBranchView.ui` setting.
+
+- **Webview**: the default visual view, with a lane-drawn commit graph,
+  resizable columns, branch tree, compare view, and changed-file diffs.
+- **Native**: built-in VS Code tree views in the Activity Bar. This is simpler,
+  theme-friendly, and accessible, but it does not draw the commit graph.
+- **Both**: enables the Webview and Native tree views at the same time.
+
+The default `auto` setting uses the mode packaged with the extension, currently
+Webview.
+
+## Development
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for local setup, tests, packaging, and
+architecture notes.
+
+## Screenshot
+
 ![Branch view](https://github.com/msdrx/git-branch-view/blob/main/media/screenshot.png)
 
 ## License
